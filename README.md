@@ -161,13 +161,22 @@ Prisma migrations — never hand-edit the database. Current entities: `User`,
   investigation replay UI (Phase 10).
 - Observability/monitoring (`infrastructure/monitoring` is a placeholder).
 
+## Roadmap
+
+The full phase-by-phase build plan — what ships in each phase, what's
+deliberately deferred, where the work lands in this repo, and what unlocks
+next — lives in [`docs/roadmap/`](docs/roadmap/README.md), with one file per
+phase. That directory's status table is the source of truth for "what phase
+are we in"; keep it updated as phases complete.
+
 ## Recommended next phase
 
-**Phase 1: Core Platform** — auth, users, organizations, data source CRUD,
-a real investigation-creation endpoint, and a basic dashboard reading live
-data — still with no AI. This turns today's one read-only proof-of-wiring
-endpoint into an actually usable platform, and is the right foundation to
-build the Analytics Agent (Phase 4) on top of.
+**[Phase 1: Core Platform](docs/roadmap/phase-01-core-platform.md)** — auth,
+users, organizations, data source CRUD, a real investigation-creation
+endpoint, and a basic dashboard reading live data — still with no AI. This
+turns today's one read-only proof-of-wiring endpoint into an actually usable
+platform, and is the right foundation to build the Analytics Agent (Phase 4)
+on top of.
 
 ## Contributing
 

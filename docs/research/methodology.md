@@ -7,7 +7,9 @@ brief (section 18) — architecture and foundations first, then core platform,
 data ingestion, the analytics engine, a first single agent, a coordinator,
 context engineering, multi-agent A2A, MCP integrations, autonomous
 investigations, and finally explainability/replay tooling. Each phase
-produces something runnable; no phase is "half of a feature."
+produces something runnable; no phase is "half of a feature." See
+[`docs/roadmap/`](../roadmap/README.md) for what each phase concretely ships,
+what it deliberately defers, and where the work lands in this repository.
 
 Every non-trivial architectural choice is recorded as an ADR
 (`docs/decisions/`) at the time it's made, capturing the alternatives

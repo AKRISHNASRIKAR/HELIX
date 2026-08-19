@@ -94,5 +94,5 @@ Prisma schema/migrations, the shared TS+Python domain contracts, the
 `BaseAgent` and `DataSourceAdapter` interfaces, and one read-only
 `GET /investigations` endpoint proving Postgres↔NestJS wiring. See the root
 `README.md`'s "What has deliberately not been implemented yet" section for
-the full list, and section 18 of the original project brief for the phase
-plan.
+the full list, and [`docs/roadmap/`](../roadmap/README.md) for the detailed,
+phase-by-phase build plan (mirrors section 18 of the original project brief).

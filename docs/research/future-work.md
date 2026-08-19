@@ -1,9 +1,11 @@
 # Future Work
 
 Tracked here so scope decisions made for this foundation aren't mistaken for
-permanent limitations. See the project brief's phase plan (section 18) for
-the authoritative sequencing; this is a shorter "what's explicitly deferred
-and why" list.
+permanent limitations. See [`docs/roadmap/`](../roadmap/README.md) for the
+authoritative, phase-by-phase sequencing (mirrors the project brief's section
+18); this is a shorter "what's explicitly deferred and why" list, plus a few
+ideas that sit beyond the ten-phase plan entirely (see
+[`docs/roadmap/phase-10-explainability-replay.md`](../roadmap/phase-10-explainability-replay.md#whats-next)).
 
 - **Autonomous investigations** (brief section 16) — anomaly detection
   triggering an investigation without a user asking. Deferred until
