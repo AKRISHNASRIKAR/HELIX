@@ -1,0 +1,13 @@
+@import 'tailwindcss';
+
+/* Scan the shared UI package for class names too, since it's compiled from
+   source (see transpilePackages in next.config.ts) rather than pre-built. */
+@source '../../../packages/ui/src';
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}

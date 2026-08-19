@@ -1,0 +1,14 @@
+{
+  "name": "@helix/a2a-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Routes agent-to-agent AgentMessage envelopes; the transport behind HELIX's internal A2A abstraction",
+  "scripts": {
+    "build": "true",
+    "dev": "SERVICE_PORT=8005 bash ../../scripts/python-run.sh dev",
+    "lint": "bash ../../scripts/python-run.sh lint",
+    "test": "bash ../../scripts/python-run.sh test",
+    "typecheck": "bash ../../scripts/python-run.sh typecheck",
+    "clean": "rm -rf .venv .pytest_cache **/__pycache__"
+  }
+}

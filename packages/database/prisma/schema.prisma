@@ -1,0 +1,565 @@
+// HELIX primary application database schema.
+// PostgreSQL is the source of truth for all persistent data (see docs/architecture/system-overview.md).
+// Redis is cache/queue/ephemeral-state only — nothing here should ever be "the real copy" in Redis.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums (kept in sync with packages/types/src/enums.ts)
+// ---------------------------------------------------------------------------
+
+enum OrganizationRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum DataSourceType {
+  POSTGRESQL
+  CSV
+  REST_API
+  GITHUB
+  MCP
+}
+
+enum DataSourceStatus {
+  PENDING
+  CONNECTED
+  ERROR
+  DISABLED
+}
+
+enum InvestigationTriggerType {
+  USER_QUESTION
+  ANOMALY_DETECTED
+  SCHEDULED
+  MANUAL
+}
+
+enum InvestigationStatus {
+  PENDING
+  PLANNING
+  IN_PROGRESS
+  AWAITING_EVIDENCE
+  COMPLETED
+  PARTIALLY_COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AgentType {
+  COORDINATOR
+  ANALYTICS
+  FINANCE
+  CUSTOMER
+  PRODUCT
+  OPERATIONS
+  VISUALIZATION
+}
+
+enum AgentStatus {
+  IDLE
+  BUSY
+  UNAVAILABLE
+}
+
+enum AgentTaskStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  TIMED_OUT
+  SKIPPED
+}
+
+enum AgentMessageType {
+  TASK_REQUEST
+  TASK_RESULT
+  STATUS_UPDATE
+  ERROR
+  CONTEXT_REQUEST
+  CONTEXT_RESPONSE
+}
+
+enum EvidenceSourceType {
+  METRIC
+  DATABASE_QUERY
+  DOCUMENT
+  API_RESPONSE
+  ANOMALY
+}
+
+enum AnalyticsType {
+  DESCRIPTIVE
+  DIAGNOSTIC
+  PREDICTIVE
+  PRESCRIPTIVE
+}
+
+enum RecommendationPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AnomalySeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// ---------------------------------------------------------------------------
+// Identity & tenancy
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships       OrganizationMember[]
+  createdInvestigations Investigation[]     @relation("InvestigationCreatedBy")
+  auditLogs         AuditLog[]
+
+  @@map("users")
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members       OrganizationMember[]
+  projects      Project[]
+  dataSources   DataSource[]
+  investigations Investigation[]
+  metrics       Metric[]
+  anomalies     Anomaly[]
+  auditLogs     AuditLog[]
+
+  @@map("organizations")
+}
+
+// Join table: a user's role within one organization. Organization isolation
+// (section 21, Security) is enforced at the query layer using this table —
+// every tenant-scoped query must filter by organizationId.
+model OrganizationMember {
+  id             String           @id @default(uuid())
+  organizationId String
+  userId         String
+  role           OrganizationRole @default(MEMBER)
+  createdAt      DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@map("organization_members")
+}
+
+model Project {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  investigations Investigation[]
+
+  @@index([organizationId])
+  @@map("projects")
+}
+
+// ---------------------------------------------------------------------------
+// Data sources
+// ---------------------------------------------------------------------------
+
+model DataSource {
+  id               String            @id @default(uuid())
+  organizationId   String
+  name             String
+  type             DataSourceType
+  status           DataSourceStatus  @default(PENDING)
+  // Non-secret connection details only (host, port, database name, sync options).
+  // Credentials are resolved at connect-time from a secret manager, never stored here.
+  connectionConfig Json              @default("{}")
+  lastSyncedAt     DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  schemas      DataSourceSchema[]
+  metrics      Metric[]
+  anomalies    Anomaly[]
+
+  @@index([organizationId])
+  @@map("data_sources")
+}
+
+// Discovered schema of one table/collection within a DataSource (section 2, Data Ingestion).
+model DataSourceSchema {
+  id                String   @id @default(uuid())
+  dataSourceId      String
+  tableName         String
+  // Array of { name, type, nullable, description? }
+  columns           Json
+  rowCountEstimate  Int?
+  discoveredAt      DateTime @default(now())
+
+  dataSource DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@unique([dataSourceId, tableName])
+  @@map("data_source_schemas")
+}
+
+// ---------------------------------------------------------------------------
+// Investigations — the central domain concept (section 13)
+// ---------------------------------------------------------------------------
+
+model Investigation {
+  id               String                    @id @default(uuid())
+  organizationId   String
+  projectId        String
+  createdByUserId  String?
+  triggerType      InvestigationTriggerType  @default(USER_QUESTION)
+  question         String
+  status           InvestigationStatus       @default(PENDING)
+  // InvestigationPlan produced by the Coordinator; see packages/contracts/src/investigation.ts
+  plan             Json?
+  rootCauseFindingId String?                 @unique
+  summary          String?
+  overallConfidence Float?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation("InvestigationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  // The finding identified as the root cause, once one is established.
+  rootCauseFinding Finding? @relation("InvestigationRootCause", fields: [rootCauseFindingId], references: [id], onDelete: SetNull)
+
+  steps            InvestigationStep[]
+  events           InvestigationEvent[]
+  agentTasks       AgentTask[]
+  agentMessages    AgentMessage[]
+  evidence         Evidence[]
+  findings         Finding[]                @relation("InvestigationFindings")
+  recommendations  Recommendation[]
+  contextSnapshots ContextSnapshot[]
+
+  @@index([organizationId])
+  @@index([projectId])
+  @@index([status])
+  @@map("investigations")
+}
+
+// One step of the Coordinator's plan (section 13, Investigation Plan). An
+// AgentTask is the execution record of one InvestigationStep.
+model InvestigationStep {
+  id              String   @id @default(uuid())
+  investigationId String
+  order           Int
+  agentType       AgentType
+  objective       String
+  // Order values of steps this one depends on, e.g. [0, 1]
+  dependsOn       Json     @default("[]")
+  createdAt       DateTime @default(now())
+
+  investigation Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+  agentTasks    AgentTask[]
+
+  @@unique([investigationId, order])
+  @@map("investigation_steps")
+}
+
+// Append-only timeline of everything that happened during an investigation —
+// the backbone of Investigation Replay (section 14).
+model InvestigationEvent {
+  id              String   @id @default(uuid())
+  investigationId String
+  type            String
+  payload         Json     @default("{}")
+  createdAt       DateTime @default(now())
+
+  investigation Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+
+  @@index([investigationId, createdAt])
+  @@map("investigation_events")
+}
+
+// ---------------------------------------------------------------------------
+// Agents & A2A
+// ---------------------------------------------------------------------------
+
+model Agent {
+  id           String      @id @default(uuid())
+  type         AgentType
+  name         String
+  description  String
+  version      String
+  status       AgentStatus @default(IDLE)
+  // Array of AgentCapability { name, description, inputSchema?, outputSchema? }
+  capabilities Json        @default("[]")
+  endpoint     String
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  agentTasks AgentTask[]
+
+  @@unique([type, version])
+  @@map("agents")
+}
+
+model AgentTask {
+  id                  String            @id @default(uuid())
+  investigationId     String
+  investigationStepId String?
+  agentType           AgentType
+  agentId             String?
+  status              AgentTaskStatus   @default(QUEUED)
+  objective           String
+  // Context assembled by the Context Engine specifically for this task.
+  inputContext        Json              @default("{}")
+  result              Json?
+  error               String?
+  startedAt           DateTime?
+  completedAt         DateTime?
+  timeoutMs           Int               @default(60000)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  investigation     Investigation      @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+  investigationStep InvestigationStep? @relation(fields: [investigationStepId], references: [id], onDelete: SetNull)
+  agent             Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  messages         AgentMessage[]
+  evidence         Evidence[]
+  contextSnapshots ContextSnapshot[]
+
+  @@index([investigationId])
+  @@index([status])
+  @@map("agent_tasks")
+}
+
+// A2A message log. fromAgent/toAgent are stored as strings (not a strict FK)
+// because "COORDINATOR" is a logical participant, not a row in Agent.
+model AgentMessage {
+  id              String            @id @default(uuid())
+  type            AgentMessageType
+  investigationId String
+  agentTaskId     String?
+  fromAgent       String
+  toAgent         String
+  payload         Json              @default("{}")
+  correlationId   String
+  createdAt       DateTime          @default(now())
+
+  investigation Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+  agentTask     AgentTask?    @relation(fields: [agentTaskId], references: [id], onDelete: SetNull)
+
+  @@index([investigationId])
+  @@index([correlationId])
+  @@map("agent_messages")
+}
+
+// ---------------------------------------------------------------------------
+// Evidence, findings, recommendations (sections 15, 13)
+// ---------------------------------------------------------------------------
+
+model Evidence {
+  id              String             @id @default(uuid())
+  investigationId String
+  agentTaskId     String
+  sourceType      EvidenceSourceType
+  // SourceRef { dataSourceId?, agentId?, agentTaskId?, description }
+  source          Json
+  summary         String
+  data            Json               @default("{}")
+  confidence      Float
+  collectedAt     DateTime           @default(now())
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  investigation Investigation    @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+  agentTask     AgentTask        @relation(fields: [agentTaskId], references: [id], onDelete: Cascade)
+  findingLinks  FindingEvidence[]
+
+  @@index([investigationId])
+  @@map("evidence")
+}
+
+model Finding {
+  id              String        @id @default(uuid())
+  investigationId String
+  agentType       AgentType
+  analyticsType   AnalyticsType
+  statement       String
+  confidence      Float
+  isRootCause     Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  investigation Investigation @relation("InvestigationFindings", fields: [investigationId], references: [id], onDelete: Cascade)
+  // Reverse side of Investigation.rootCauseFinding (see above).
+  rootCauseOf   Investigation? @relation("InvestigationRootCause")
+
+  evidenceLinks       FindingEvidence[]
+  recommendationLinks RecommendationFinding[]
+
+  @@index([investigationId])
+  @@map("findings")
+}
+
+// Many-to-many: a finding can cite multiple pieces of evidence, and (less
+// commonly) one piece of evidence can support multiple findings.
+model FindingEvidence {
+  findingId  String
+  evidenceId String
+
+  finding  Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  evidence Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+
+  @@id([findingId, evidenceId])
+  @@map("finding_evidence")
+}
+
+model Recommendation {
+  id              String                 @id @default(uuid())
+  investigationId String
+  title           String
+  description     String
+  priority        RecommendationPriority @default(MEDIUM)
+  expectedImpact  String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  investigation Investigation           @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+  findingLinks  RecommendationFinding[]
+
+  @@index([investigationId])
+  @@map("recommendations")
+}
+
+model RecommendationFinding {
+  recommendationId String
+  findingId        String
+
+  recommendation Recommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  finding        Finding        @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@id([recommendationId, findingId])
+  @@map("recommendation_findings")
+}
+
+// ---------------------------------------------------------------------------
+// Analytics primitives
+// ---------------------------------------------------------------------------
+
+model Metric {
+  id                String   @id @default(uuid())
+  organizationId    String
+  dataSourceId      String?
+  name              String
+  unit              String?
+  value             Float
+  baseline          Float?
+  changePercent     Float?
+  // Array of { timestamp, value } — optional time series backing this metric.
+  series            Json?
+  computedAt        DateTime @default(now())
+  // Human-readable description of how this was computed, e.g. "30-day sum, pandas groupby".
+  computationMethod String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  dataSource   DataSource?  @relation(fields: [dataSourceId], references: [id], onDelete: SetNull)
+  anomalies    Anomaly[]
+
+  @@index([organizationId, name])
+  @@map("metrics")
+}
+
+model Anomaly {
+  id               String          @id @default(uuid())
+  organizationId   String
+  metricId         String?
+  dataSourceId     String?
+  description      String
+  severity         AnomalySeverity @default(MEDIUM)
+  detectedAt       DateTime        @default(now())
+  detectionMethod  String
+  value            Float
+  expectedValue    Float?
+  deviationScore   Float?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  metric       Metric?      @relation(fields: [metricId], references: [id], onDelete: SetNull)
+  dataSource   DataSource?  @relation(fields: [dataSourceId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([detectedAt])
+  @@map("anomalies")
+}
+
+// ---------------------------------------------------------------------------
+// Context Engineering (section 12) & audit (section 21)
+// ---------------------------------------------------------------------------
+
+// Exactly what context an agent was given for a specific task — required for
+// Investigation Replay and for debugging "why did the agent say that".
+model ContextSnapshot {
+  id              String    @id @default(uuid())
+  investigationId String
+  agentTaskId     String?
+  agentType       AgentType
+  assembledContext Json
+  tokenCount      Int?
+  createdAt       DateTime  @default(now())
+
+  investigation Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+  agentTask     AgentTask?    @relation(fields: [agentTaskId], references: [id], onDelete: SetNull)
+
+  @@index([investigationId])
+  @@map("context_snapshots")
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String?
+  userId         String?
+  action         String
+  resourceType   String
+  resourceId     String?
+  metadata       Json     @default("{}")
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
+}

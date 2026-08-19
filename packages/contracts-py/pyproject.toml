@@ -1,0 +1,13 @@
+[project]
+name = "helix-contracts"
+version = "0.1.0"
+description = "Pydantic mirrors of packages/contracts (zod) — shared domain contracts for HELIX Python services"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.9,<3"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["helix_contracts"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

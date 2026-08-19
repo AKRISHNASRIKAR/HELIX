@@ -1,0 +1,14 @@
+# Shared lint/format config for every Python package under services/, agents/,
+# analytics/, and packages/contracts-py. Ruff walks up to find this file, so
+# running `ruff check .` from inside any service picks it up automatically.
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [".venv", "generated"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

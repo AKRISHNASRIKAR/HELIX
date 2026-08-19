@@ -1,0 +1,14 @@
+{
+  "name": "@helix/context-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Decides what context each agent needs, finds it, filters/ranks it, and assembles it",
+  "scripts": {
+    "build": "true",
+    "dev": "SERVICE_PORT=8003 bash ../../scripts/python-run.sh dev",
+    "lint": "bash ../../scripts/python-run.sh lint",
+    "test": "bash ../../scripts/python-run.sh test",
+    "typecheck": "bash ../../scripts/python-run.sh typecheck",
+    "clean": "rm -rf .venv .pytest_cache **/__pycache__"
+  }
+}

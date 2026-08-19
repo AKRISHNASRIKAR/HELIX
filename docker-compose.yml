@@ -1,0 +1,157 @@
+name: helix
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-helix}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-helix}
+      POSTGRES_DB: ${POSTGRES_DB:-helix}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-helix}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - ./infrastructure/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/api.Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-helix}:${POSTGRES_PASSWORD:-helix}@postgres:5432/${POSTGRES_DB:-helix}?schema=public
+      REDIS_URL: redis://redis:6379
+      API_PORT: ${API_PORT:-4000}
+      WEB_APP_URL: http://web:${WEB_PORT:-3000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - '${API_PORT:-4000}:4000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/web.Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-4000}
+    ports:
+      - '${WEB_PORT:-3000}:3000'
+    depends_on:
+      - api
+
+  agent-runtime:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/python-service.Dockerfile
+      args:
+        SERVICE_PATH: services/agent-runtime
+        SERVICE_PORT: ${AGENT_RUNTIME_PORT:-8001}
+    restart: unless-stopped
+    environment:
+      AGENT_RUNTIME_REDIS_URL: redis://redis:6379
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - '${AGENT_RUNTIME_PORT:-8001}:${AGENT_RUNTIME_PORT:-8001}'
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  analytics-engine:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/python-service.Dockerfile
+      args:
+        SERVICE_PATH: services/analytics-engine
+        SERVICE_PORT: ${ANALYTICS_ENGINE_PORT:-8002}
+    restart: unless-stopped
+    environment:
+      ANALYTICS_ENGINE_DATABASE_URL: postgresql://${POSTGRES_USER:-helix}:${POSTGRES_PASSWORD:-helix}@postgres:5432/${POSTGRES_DB:-helix}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - '${ANALYTICS_ENGINE_PORT:-8002}:${ANALYTICS_ENGINE_PORT:-8002}'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  context-engine:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/python-service.Dockerfile
+      args:
+        SERVICE_PATH: services/context-engine
+        SERVICE_PORT: ${CONTEXT_ENGINE_PORT:-8003}
+    restart: unless-stopped
+    environment:
+      CONTEXT_ENGINE_REDIS_URL: redis://redis:6379
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - '${CONTEXT_ENGINE_PORT:-8003}:${CONTEXT_ENGINE_PORT:-8003}'
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  ingestion-service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/python-service.Dockerfile
+      args:
+        SERVICE_PATH: services/ingestion-service
+        SERVICE_PORT: ${INGESTION_SERVICE_PORT:-8004}
+    restart: unless-stopped
+    environment:
+      INGESTION_SERVICE_DATABASE_URL: postgresql://${POSTGRES_USER:-helix}:${POSTGRES_PASSWORD:-helix}@postgres:5432/${POSTGRES_DB:-helix}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - '${INGESTION_SERVICE_PORT:-8004}:${INGESTION_SERVICE_PORT:-8004}'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  a2a-gateway:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/python-service.Dockerfile
+      args:
+        SERVICE_PATH: services/a2a-gateway
+        SERVICE_PORT: ${A2A_GATEWAY_PORT:-8005}
+    restart: unless-stopped
+    environment:
+      A2A_GATEWAY_REDIS_URL: redis://redis:6379
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - '${A2A_GATEWAY_PORT:-8005}:${A2A_GATEWAY_PORT:-8005}'
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

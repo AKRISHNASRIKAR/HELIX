@@ -1,0 +1,14 @@
+{
+  "name": "@helix/contracts-py",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Turbo wrapper for the helix-contracts Python package (pydantic mirrors of @helix/contracts)",
+  "scripts": {
+    "build": "true",
+    "dev": "true",
+    "lint": "bash ../../scripts/python-run.sh lint",
+    "test": "bash ../../scripts/python-run.sh test",
+    "typecheck": "true",
+    "clean": "rm -rf .venv .pytest_cache **/__pycache__"
+  }
+}
