@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -6,10 +7,29 @@ export const metadata: Metadata = {
   description: 'Autonomous Enterprise Investigation Platform',
 };
 
+const NAV = [
+  { href: '/', label: 'Dashboard' },
+  { href: '/investigations', label: 'Investigations' },
+];
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
+        <header className="border-b border-slate-200 bg-white">
+          <div className="mx-auto flex max-w-6xl items-center gap-6 px-6 py-3">
+            <Link href="/" className="text-sm font-semibold tracking-tight">
+              HELIX
+            </Link>
+            <nav className="flex gap-4 text-sm text-slate-600">
+              {NAV.map((item) => (
+                <Link key={item.href} href={item.href} className="hover:text-slate-900">
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+          </div>
+        </header>
         <div className="mx-auto max-w-6xl px-6 py-8">{children}</div>
       </body>
     </html>
