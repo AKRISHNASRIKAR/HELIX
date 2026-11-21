@@ -6,8 +6,36 @@
 
 :root {
   color-scheme: light;
+
+  --canvas: #f6f6f4;
+  --surface: #ffffff;
+  --border: #e7e6e1;
+  --grid: #efeeea;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #8a8984;
+  --text-good: #006300;
+  --text-bad: #b42828;
+
+  /* Categorical (fixed order) — validated reference palette */
+  --series-1: #2a78d6;
+  --series-1-soft: #b7d3f6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+
+  /* Status — reserved, always paired with icon/label */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  --band: rgba(42, 120, 214, 0.1);
+  --anomaly-fill: rgba(208, 59, 59, 0.08);
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  background: var(--canvas);
+  color: var(--text-primary);
+  @apply antialiased;
+  font-feature-settings: 'cv11', 'ss01';
 }

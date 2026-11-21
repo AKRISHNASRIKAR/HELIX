@@ -6,7 +6,12 @@ import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { InvestigationsModule } from './investigations/investigations.module';
+import { DemoModule } from './demo/demo.module';
 import { validateEnv } from './config/env';
+
+// HELIX_DEMO=1 swaps every Postgres/Redis-backed module for fixture data, so
+// the web app can be run and shown without any infrastructure.
+const DEMO = process.env.HELIX_DEMO === '1';
 
 @Module({
   imports: [
@@ -23,10 +28,7 @@ import { validateEnv } from './config/env';
     // Rate limiting (section 21, Security): generous defaults for local dev,
     // tighten per-route with @Throttle() as endpoints are added.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
-    PrismaModule,
-    RedisModule,
-    HealthModule,
-    InvestigationsModule,
+    ...(DEMO ? [DemoModule] : [PrismaModule, RedisModule, HealthModule, InvestigationsModule]),
   ],
 })
 export class AppModule {}
