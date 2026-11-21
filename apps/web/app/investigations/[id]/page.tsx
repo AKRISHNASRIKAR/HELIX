@@ -29,6 +29,8 @@ export default async function InvestigationDetailPage({
   ];
 
   const planSteps = investigation.plan?.steps ?? [];
+  const findings = investigation.findings ?? [];
+  const recommendations = investigation.recommendations ?? [];
 
   return (
     <main className="space-y-6">
@@ -68,6 +70,50 @@ export default async function InvestigationDetailPage({
           </p>
         </Card>
       </section>
+
+      {findings.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold text-slate-700">Findings</h2>
+          <div className="space-y-3">
+            {findings.map((f) => (
+              <Card key={f.statement} className={f.isRootCause ? 'border-[var(--series-1)] ring-1 ring-[var(--series-1)]' : undefined}>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                      {f.agentType.toLowerCase()} agent · {f.analyticsType.toLowerCase()}
+                      {f.isRootCause && <span className="ml-2 rounded bg-[var(--series-1)] px-1.5 py-0.5 text-[10px] text-white">ROOT CAUSE</span>}
+                    </p>
+                    <p className="mt-1 text-sm font-medium text-slate-900">{f.statement}</p>
+                    <ul className="mt-2 flex flex-wrap gap-1.5">
+                      {f.evidence.map((e) => (
+                        <li key={e} className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{e}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums">{Math.round(f.confidence * 100)}%</span>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {recommendations.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold text-slate-700">Recommendations</h2>
+          <Card className="divide-y divide-slate-100 p-0">
+            {recommendations.map((r) => (
+              <div key={r.action} className="flex items-start justify-between gap-4 p-4">
+                <div>
+                  <p className="text-sm font-medium">{r.action}</p>
+                  <p className="mt-0.5 text-xs text-slate-500">{r.expectedImpact}</p>
+                </div>
+                <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">{r.priority.toLowerCase()}</span>
+              </div>
+            ))}
+          </Card>
+        </section>
+      )}
 
       <section className="space-y-2">
         <h2 className="text-sm font-semibold text-slate-700">Plan</h2>

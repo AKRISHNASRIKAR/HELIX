@@ -11,7 +11,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "jest",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "dev:demo": "HELIX_DEMO=1 DATABASE_URL=postgresql://demo:demo@localhost:5432/demo REDIS_URL=redis://localhost:6379 nest start --watch"
   },
   "dependencies": {
     "@helix/config": "workspace:*",
