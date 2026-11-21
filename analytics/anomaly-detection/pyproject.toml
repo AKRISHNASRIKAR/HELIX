@@ -1,0 +1,13 @@
+[project]
+name = "helix-anomaly"
+version = "0.1.0"
+description = "Statistical anomaly detection over daily metric series (robust z-score, IQR, STL residuals)"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2.0,<3", "pandas>=2.2,<3", "statsmodels>=0.14,<0.15"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["helix_anomaly"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

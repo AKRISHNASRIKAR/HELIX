@@ -13,7 +13,9 @@ AI/analytics services, agents, and shared contracts. See
 `docs/architecture/system-overview.md` for the full architecture and
 `docs/decisions/` for why it's built this way.
 
-> **Status:** Phase 0 — foundation. See "What has been implemented" below.
+> **Status:** Phases 0 to 5 complete. A user can connect a data source, ask a
+> question, and get an evidence-backed root cause. See "What has been
+> implemented" below.
 
 ## Repository structure
 
@@ -29,8 +31,8 @@ services/
   ingestion-service/ Data source connection, schema discovery, profiling
   a2a-gateway/      Agent-to-agent message routing
 
-agents/           One directory per agent's domain logic (mostly READMEs for now)
-analytics/        Algorithm libraries analytics-engine composes (mostly READMEs for now)
+agents/           One package per agent (analytics, coordinator implemented; others are READMEs)
+analytics/        Algorithm libraries analytics-engine composes (anomaly-detection, forecasting implemented)
 
 packages/
   types/            Shared enums
@@ -74,6 +76,30 @@ pnpm dev                        # turbo runs every app/service's dev script in p
 This gives hot reload for `apps/web` (Next.js) and `apps/api` (NestJS
 `--watch`), and `uvicorn --reload` for the Python services.
 
+### Option C: no Docker at all
+Native Postgres (14+) and Redis work just as well. Create the role and
+database once, then use Option B without the `docker compose` step:
+```bash
+psql -d postgres -c "CREATE ROLE helix LOGIN PASSWORD 'helix' CREATEDB;"
+psql -d postgres -c "CREATE DATABASE helix OWNER helix;"
+psql -d postgres -c "CREATE DATABASE helix_test OWNER helix;"   # for API e2e tests
+pnpm --filter @helix/database db:migrate:deploy
+DATABASE_URL="postgresql://helix:helix@localhost:5432/helix_test?schema=public" \
+  pnpm --filter @helix/database db:migrate:deploy
+```
+
+### Try an investigation
+With everything running, sign up at http://localhost:3000, create an
+organization and project, upload `tests/fixtures/orders.csv` under Data
+sources, then ask "Why did revenue drop last week?" The Coordinator and
+Analytics Agent should name the seeded 2026-10-08 revenue drop as the root
+cause within a few seconds. "Why did refunds spike?" finds the seeded refund
+spike. API docs are at http://localhost:4000/docs.
+
+### Demo mode
+`HELIX_DEMO=1` on the API (`pnpm --filter @helix/api dev:demo`) and the web
+app serves fixture data with no Postgres, Redis or login.
+
 ### Health checks
 Every service exposes `GET /health`:
 
@@ -97,69 +123,100 @@ pnpm typecheck        # typecheck everything
 pnpm db:migrate        # create/apply a Prisma migration
 pnpm db:studio         # open Prisma Studio
 pnpm --filter @helix/api dev   # run just one package's script
+pnpm --filter @helix/api test:e2e        # API e2e tests (needs the helix_test database)
+pnpm --filter @helix/api openapi:export  # regenerate docs/api/openapi.json
 ```
 
 ## Environment variables
 
-See `.env.example` at the repo root for the full list with defaults —
+See `.env.example` at the repo root for the full list with defaults. It
 covers Postgres/Redis connection info, each service's port, `WEB_APP_URL` /
-`NEXT_PUBLIC_API_URL` for CORS and API calls, and an `ANTHROPIC_API_KEY`
-placeholder for Phase 4+ agent reasoning (unused today). Never commit `.env`
-— only `.env.example` (placeholders only) is tracked.
+`NEXT_PUBLIC_API_URL`, auth (`JWT_SECRET`, `JWT_EXPIRES_IN`), credential
+encryption (`HELIX_SECRETS_KEY`, see ADR-006), CSV storage
+(`HELIX_UPLOAD_DIR`), and service-to-service settings
+(`HELIX_INTERNAL_TOKEN`, `HELIX_API_URL`, `INGESTION_SERVICE_URL`,
+`AGENT_RUNTIME_URL`, `ANALYTICS_ENGINE_URL`). `ANTHROPIC_API_KEY` is a
+placeholder: agent reasoning is deterministic today (ADR-007). The API
+refuses the dev-default secrets when `NODE_ENV=production`. Never commit
+`.env`; only `.env.example` (placeholders only) is tracked.
 
 ## Database schema
 
 Owned entirely by `packages/database/prisma/schema.prisma`, applied via
 Prisma migrations — never hand-edit the database. Current entities: `User`,
 `Organization`, `OrganizationMember`, `Project`, `DataSource`,
-`DataSourceSchema`, `Investigation`, `InvestigationStep`,
+`DataSourceSchema`, `DataSourceCredential`, `Investigation`, `InvestigationStep`,
 `InvestigationEvent`, `Agent`, `AgentTask`, `AgentMessage`, `Evidence`,
 `Finding` (+ `FindingEvidence` join), `Recommendation` (+
 `RecommendationFinding` join), `Metric`, `Anomaly`, `ContextSnapshot`,
-`AuditLog`. See `docs/architecture/system-overview.md` for what each owns.
+`AuditLog`, `Notification`. See `docs/architecture/system-overview.md` for what each owns.
 
-## What has been implemented (Phase 0)
+## What has been implemented (Phases 0 to 5)
 
-- Monorepo tooling: pnpm workspaces, Turborepo, shared TS config, ESLint,
-  Prettier, a shared Ruff/pytest config for Python.
-- `apps/web` (Next.js + Tailwind v4) and `apps/api` (NestJS) skeletons, both
-  building and running.
-- All five Python services (`agent-runtime`, `analytics-engine`,
-  `context-engine`, `ingestion-service`, `a2a-gateway`) as FastAPI apps with
-  working `/health` endpoints.
-- Shared domain contracts for `Investigation`, `Agent`, `AgentTask`,
-  `AgentMessage`, `Evidence`, `Finding`, `Recommendation`, `DataSource`,
-  `Metric` — as zod schemas (`packages/contracts`) *and* Pydantic models
-  (`packages/contracts-py`), kept in sync by hand today.
-- Full Prisma schema + an initial migration covering every entity above.
-- `BaseAgent` interface (`services/agent-runtime/app/agents/base.py`) and
-  `DataSourceAdapter` interface (`services/ingestion-service/app/adapters/base.py`)
-  — the two seams concrete agents and data connectors will plug into.
-- One real vertical slice: `apps/web`'s dashboard server-fetches
-  `apps/api`'s `/health`, and `GET /api/v1/investigations` reads real (empty)
-  rows from Postgres via Prisma — proving the Next.js → NestJS → Postgres
-  path actually works.
-- Docker Compose covering every service, and Dockerfiles for each.
-- Unit tests (NestJS service, Python contracts) and integration/e2e tests
-  (API health check against real Postgres/Redis, every service's health
-  endpoint) — see each package's own tests.
-- Architecture docs (`docs/architecture/`), five ADRs (`docs/decisions/`),
-  and research notes (`docs/research/`).
+**Phase 0, foundation.** Monorepo tooling (pnpm, Turborepo, ESLint, Prettier,
+Ruff, pytest), every app and service skeleton, shared zod and Pydantic
+contracts, the full Prisma schema, Docker Compose, architecture docs and ADRs.
+
+**Phase 1, core platform** (`apps/api`, `apps/web`).
+- Email/password auth: argon2 hashing and JWTs, with a global guard.
+- Organizations and members with OWNER/ADMIN/MEMBER/VIEWER roles.
+- Tenant isolation through a validated `X-Organization-Id` header.
+- Projects, data source records, and investigation CRUD.
+- In-app notifications, and an `AuditLog` row for every mutation.
+- Swagger at `/docs` (exported to `docs/api/openapi.json`).
+- Web: login, signup, onboarding and an org switcher. The dashboard shows
+  real counts.
+
+**Phase 2, data ingestion** (`services/ingestion-service`).
+- `PostgresAdapter` and `CsvAdapter`: connect, schema discovery, preview,
+  profiling with semantic types, and extract.
+- Credentials are encrypted at rest and CSV uploads stored on disk (ADR-006).
+- Web: Data Sources pages to connect, inspect schemas, preview and profile.
+
+**Phase 3, analytics engine** (`services/analytics-engine`,
+`analytics/anomaly-detection`, `analytics/forecasting`).
+- KPIs with Welch t-test p-values, column statistics, trends.
+- Anomaly detection (robust z-score, IQR, STL seasonal).
+- ETS/ARIMA forecasts with a backtest.
+- Every result carries `computationMethod`.
+- Ground-truth tests on the seeded `tests/fixtures/orders.csv` dataset.
+
+**Phase 4, Analytics Agent** (`agents/analytics`).
+- Rule-based tool selection over the engine's endpoints.
+- Evidence and findings whose confidence is derived from the statistics
+  (p-values, z-scores, backtest error). The agent never computes numbers
+  itself (ADR-005).
+- Failures come back as a FAILED task, never an exception.
+
+**Phase 5, Coordinator Agent** (`agents/coordinator`,
+`services/agent-runtime`).
+- `POST /investigations` runs for real: plan, dispatch, synthesis.
+- Root cause, overall confidence, summary and recommendations.
+- Live status and an `InvestigationEvent` timeline.
+- Partial or failed runs are handled.
+- Web: the investigation page auto-refreshes while running and shows
+  findings, evidence, recommendations, plan steps and the timeline.
+- How execution is split between services is in ADR-007.
 
 ## What has deliberately NOT been implemented yet
 
-- Authentication, authorization, and any real CRUD beyond the one read-only
-  investigations endpoint (Phase 1).
-- Any data source connector (Postgres/CSV adapters — Phase 2) — only the
-  `DataSourceAdapter` interface exists.
-- Any real analytics computation (KPIs, anomaly detection, forecasting —
-  Phase 3) — `analytics-engine` only has a health check.
-- Any agent logic — every `agents/*` directory is currently just a README.
-  Analytics Agent is next (Phase 4), then the Coordinator (Phase 5).
-- Context assembly (Phase 6), real A2A routing (Phase 7), MCP integrations
-  (Phase 8), autonomous/anomaly-triggered investigations (Phase 9), and the
-  investigation replay UI (Phase 10).
-- Observability/monitoring (`infrastructure/monitoring` is a placeholder).
+- **LLM reasoning.** Agent planning and synthesis are deterministic. They live
+  in isolated modules so an LLM can replace them later (ADR-007).
+- **Phase 6: context engine.** Agent context is still hand-assembled from the
+  question plus connected schemas, and `ContextSnapshot` rows are not written
+  yet.
+- **Later phases:**
+  - Phase 7: Finance/Customer/Product agents and real A2A routing.
+  - Phase 8: MCP adapters.
+  - Phase 9: autonomous, anomaly-triggered investigations.
+  - Phase 10: replay UI, root-cause correlation and the full evaluation run.
+- **Smaller gaps:**
+  - A durable job queue for investigation runs.
+  - Password reset/SSO.
+  - Notifications UI.
+  - Editing data sources, members and projects in the web app (the API
+    supports most of it).
+  - Observability (`infrastructure/monitoring` is still a placeholder).
 
 ## Roadmap
 
@@ -171,12 +228,10 @@ are we in"; keep it updated as phases complete.
 
 ## Recommended next phase
 
-**[Phase 1: Core Platform](docs/roadmap/phase-01-core-platform.md)** — auth,
-users, organizations, data source CRUD, a real investigation-creation
-endpoint, and a basic dashboard reading live data — still with no AI. This
-turns today's one read-only proof-of-wiring endpoint into an actually usable
-platform, and is the right foundation to build the Analytics Agent (Phase 4)
-on top of.
+**[Phase 6: Context Engine](docs/roadmap/phase-06-context-engine.md).**
+Replace the hand-assembled agent context with `services/context-engine`, and
+persist a `ContextSnapshot` for every task. It should land before Phase 7
+adds more agents, so new agents get properly scoped context from day one.
 
 ## Contributing
 

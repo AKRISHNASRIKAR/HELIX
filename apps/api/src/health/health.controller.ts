@@ -5,9 +5,11 @@ import {
   HealthIndicatorFunction,
   PrismaHealthIndicator,
 } from '@nestjs/terminus';
+import { Public } from '../common/decorators';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 
+@Public()
 @Controller('health')
 export class HealthController {
   constructor(

@@ -1,8 +1,12 @@
 # Evaluation Plan
 
-Not implemented yet — no agents exist to evaluate as of Phase 0. This
-document records the intended approach so evaluation is designed alongside
-the features it measures, not bolted on afterward.
+Partially in place as of Phase 5. The first seeded scenario
+(`tests/fixtures/orders.csv`, see `tests/fixtures/README.md`) exists, and
+ground-truth tests in `services/analytics-engine/tests/test_ground_truth.py`
+check that its injected anomalies are detected. The full end-to-end
+evaluation run (accuracy, hallucination rate, latency/cost) is still Phase 10
+work. This document records the intended approach so evaluation is designed
+alongside the features it measures, not bolted on afterward.
 
 ## Planned dataset
 
@@ -12,8 +16,10 @@ A set of synthetic or anonymized business scenarios, each with:
 - The expected root cause and expected supporting evidence.
 - The expected recommendation category (not necessarily exact wording).
 
-Stored under `tests/fixtures/` as they're built (currently empty — see
-`tests/README.md`).
+Stored under `tests/fixtures/` as they're built. The first one is the
+orders scenario: a revenue drop concentrated in the web channel on
+2026-10-08 plus a refund spike on 2026-10-08/09, with ground truth in
+`tests/fixtures/ground_truth.json`.
 
 ## Planned metrics (project brief, section 19)
 

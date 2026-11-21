@@ -2,7 +2,7 @@
   "name": "@helix/analytics-engine",
   "version": "0.1.0",
   "private": true,
-  "description": "Computes real KPIs, trends, anomalies, and forecasts — the LLM interprets these, it never invents them",
+  "description": "Computes real KPIs, trends, anomalies, and forecasts: the LLM interprets these, it never invents them",
   "scripts": {
     "build": "true",
     "dev": "SERVICE_PORT=8002 bash ../../scripts/python-run.sh dev",

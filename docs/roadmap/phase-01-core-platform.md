@@ -1,6 +1,6 @@
 # Phase 1: Core Platform
 
-**Status:** 🔜 Next up
+**Status:** ✅ Complete
 **Depends on:** [Phase 0](./phase-00-foundation.md) — needs the Prisma schema,
 `apps/api` skeleton, and health-check plumbing already in place.
 

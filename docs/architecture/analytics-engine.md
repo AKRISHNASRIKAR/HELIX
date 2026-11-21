@@ -46,9 +46,12 @@ LLM interpretation (turns the structured result into a Finding statement)
 
 ## Status
 
-Not implemented — only the service's health check exists (Phase 0). Phase 3
-adds KPI calculation, statistical profiling, anomaly detection, trend
-analysis, and basic forecasting, all returning structured results per the
-diagram above. Library choices (pandas vs. polars, statsmodels vs. a learned
-forecasting model, etc.) are made per algorithm as Phase 3 work starts, not
-decided wholesale up front.
+Implemented in Phase 3. `services/analytics-engine` exposes `POST /kpis`
+(with Welch t-test p-values), `/statistics`, `/trends`, `/anomalies/detect`
+and `/forecast`. Datasets are passed inline or loaded through
+`services/ingestion-service`'s `/extract`. Detection lives in
+`analytics/anomaly-detection` (robust z-score, IQR, STL seasonal residuals)
+and forecasting in `analytics/forecasting` (ETS and ARIMA baselines with a
+holdout backtest). Every result carries a non-empty `computationMethod`.
+Ground-truth tests run against `tests/fixtures/orders.csv`. Correlation,
+segmentation and root-cause analytics remain Phase 10 work.

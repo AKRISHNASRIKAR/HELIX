@@ -79,7 +79,7 @@ export function ThroughputChart({
           return (
             <g key={d.date}>
               <title>
-                {`${formatShortDate(d.date)} — ${total} investigations\nAnomaly ${d.anomaly} · Questions ${d.question} · Scheduled ${d.scheduled}`}
+                {`${formatShortDate(d.date)}: ${total} investigations\nAnomaly ${d.anomaly} · Questions ${d.question} · Scheduled ${d.scheduled}`}
               </title>
               <rect x={x - 2} y={pad.t} width={barW + 4} height={innerH} fill="transparent" />
               {SEGMENT_KEYS.map((s, si) => {

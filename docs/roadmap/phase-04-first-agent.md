@@ -1,6 +1,6 @@
 # Phase 4: First AI Agent (Analytics Agent)
 
-**Status:** Not started
+**Status:** ✅ Complete
 **Depends on:** [Phase 3](./phase-03-analytics-engine.md) — the agent has
 nothing real to call without it.
 
@@ -75,3 +75,15 @@ correctly, before Phase 5 builds delegation on top of it.
 
 [Phase 5: Coordinator Agent](./phase-05-coordinator-agent.md) — stop
 manually creating tasks; let a Coordinator plan and delegate them.
+
+## Implementation notes
+
+- No LLM yet. Tool selection is rule-based and lives in
+  `agents/analytics/helix_agent_analytics/planner.py`, so an LLM-backed
+  planner can replace it without touching the agent or wire contracts (see
+  [ADR-007](../decisions/ADR-007-investigation-execution.md)).
+- The manual harness is agent-runtime's `POST /agents/{type}/execute`. No
+  temporary endpoint was added to `apps/api`.
+- `BaseAgent` moved to `packages/contracts-py/helix_contracts/agent_base.py`
+  so agent packages can implement it standalone. The old import path still
+  works.

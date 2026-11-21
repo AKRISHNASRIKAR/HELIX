@@ -1,0 +1,13 @@
+[project]
+name = "helix-forecasting"
+version = "0.1.0"
+description = "Baseline statistical forecasting for daily metric series (ETS, ARIMA) with holdout backtests"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2.0,<3", "pandas>=2.2,<3", "statsmodels>=0.14,<0.15"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["helix_forecasting"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

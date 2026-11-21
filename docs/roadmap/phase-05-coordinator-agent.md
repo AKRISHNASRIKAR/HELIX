@@ -1,6 +1,6 @@
 # Phase 5: Coordinator Agent
 
-**Status:** Not started
+**Status:** ✅ Complete
 **Depends on:** [Phase 4](./phase-04-first-agent.md) — needs one working
 agent to delegate to before delegation itself can be tested.
 
@@ -84,3 +84,17 @@ This is the phase where `Investigation` stops being a static record
 
 [Phase 6: Context Engine](./phase-06-context-engine.md) — stop hand-assembling
 each agent's input context.
+
+## Implementation notes
+
+- The Coordinator orchestrates and `apps/api` persists. The run's full trail
+  is written in one transaction, and live status and timeline events arrive
+  through `POST /api/v1/internal/investigations/:id/progress`. See
+  [ADR-007](../decisions/ADR-007-investigation-execution.md).
+- The investigation is run in-process by the API (no durable queue yet). If
+  the API restarts mid-run, the investigation stays in a non-terminal status.
+  A durable queue should land before Phase 9's autonomous triggers.
+- Verified end to end against `tests/fixtures/orders.csv`. "Why did revenue
+  drop last week?" identifies the injected 2026-10-08 drop as the root cause,
+  and an unreachable analytics engine yields `FAILED` with a readable
+  summary.

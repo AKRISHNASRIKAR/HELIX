@@ -21,12 +21,12 @@ adapted to reference the actual repository as it exists today.
 | Phase | Name | Status | Doc |
 |---|---|---|---|
 | 0 | Architecture & Foundations | ✅ Complete | [phase-00-foundation.md](./phase-00-foundation.md) |
-| 1 | Core Platform | 🔜 Next up | [phase-01-core-platform.md](./phase-01-core-platform.md) |
-| 2 | Data Ingestion | Not started | [phase-02-data-ingestion.md](./phase-02-data-ingestion.md) |
-| 3 | Analytics Engine | Not started | [phase-03-analytics-engine.md](./phase-03-analytics-engine.md) |
-| 4 | First AI Agent (Analytics) | Not started | [phase-04-first-agent.md](./phase-04-first-agent.md) |
-| 5 | Coordinator Agent | Not started | [phase-05-coordinator-agent.md](./phase-05-coordinator-agent.md) |
-| 6 | Context Engine | Not started | [phase-06-context-engine.md](./phase-06-context-engine.md) |
+| 1 | Core Platform | ✅ Complete | [phase-01-core-platform.md](./phase-01-core-platform.md) |
+| 2 | Data Ingestion | ✅ Complete | [phase-02-data-ingestion.md](./phase-02-data-ingestion.md) |
+| 3 | Analytics Engine | ✅ Complete | [phase-03-analytics-engine.md](./phase-03-analytics-engine.md) |
+| 4 | First AI Agent (Analytics) | ✅ Complete | [phase-04-first-agent.md](./phase-04-first-agent.md) |
+| 5 | Coordinator Agent | ✅ Complete | [phase-05-coordinator-agent.md](./phase-05-coordinator-agent.md) |
+| 6 | Context Engine | 🔜 Next up | [phase-06-context-engine.md](./phase-06-context-engine.md) |
 | 7 | Multiple Agents + A2A | Not started | [phase-07-multi-agent-a2a.md](./phase-07-multi-agent-a2a.md) |
 | 8 | MCP Integrations | Not started | [phase-08-mcp.md](./phase-08-mcp.md) |
 | 9 | Autonomous Investigations | Not started | [phase-09-autonomous-investigations.md](./phase-09-autonomous-investigations.md) |

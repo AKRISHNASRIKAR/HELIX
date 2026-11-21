@@ -1,0 +1,2 @@
+-e ../../packages/contracts-py
+httpx==0.28.1

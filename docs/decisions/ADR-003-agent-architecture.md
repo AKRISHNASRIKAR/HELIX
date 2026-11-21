@@ -11,7 +11,7 @@ and benefit from being reasoned about separately. But building seven agents
 before any of them work end-to-end would be premature.
 
 ## Decision
-- Define one contract, `BaseAgent` (`services/agent-runtime/app/agents/base.py`),
+- Define one contract, `BaseAgent` (`packages/contracts-py/helix_contracts/agent_base.py`, re-exported by `services/agent-runtime/app/agents/base.py`),
   that every agent implements: `capabilities` (published to the Agent
   Registry) and `execute(task: AgentTask) -> AgentTask`.
 - Define one message envelope, `AgentMessage`, for all inter-agent

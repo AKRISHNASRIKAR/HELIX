@@ -1,20 +1,86 @@
-from fastapi import FastAPI
+import logging
 
-from .agents import BaseAgent  # noqa: F401 — re-exported for agents/* implementations
-from .config import settings
+import httpx
+from fastapi import FastAPI, HTTPException
+from helix_agent_coordinator import CoordinatorAgent, ProgressReporter
+from helix_contracts import AgentTask, AgentType, InvestigationRunRequest
 
-app = FastAPI(title="HELIX Agent Runtime", version="0.1.0")
+from .agents import BaseAgent  # noqa: F401 (re-exported for agents/* implementations)
+from .config import Settings, settings
+from .runtime import AgentRuntime, build_runtime
 
-#: Populated in Phase 4/5 as concrete agents (agents/coordinator, agents/analytics,
-#: ...) register themselves at startup. Empty for now — this service only proves
-#: out the BaseAgent contract and health-check plumbing in Phase 0.
-AGENT_REGISTRY: dict[str, BaseAgent] = {}
+logging.basicConfig(level=settings.log_level.upper())
 
 
-@app.get("/health")
-async def health() -> dict:
-    return {
-        "status": "ok",
-        "service": settings.service_name,
-        "registeredAgents": len(AGENT_REGISTRY),
-    }
+def create_app(
+    app_settings: Settings | None = None,
+    *,
+    engine_transport: httpx.AsyncBaseTransport | None = None,
+    progress: ProgressReporter | None = None,
+) -> FastAPI:
+    """Build the app with every concrete agent registered at startup.
+
+    `engine_transport` / `progress` let tests swap in a mocked analytics engine
+    and an in-memory progress reporter."""
+    app_settings = app_settings or settings
+    runtime = build_runtime(app_settings, engine_transport=engine_transport, progress=progress)
+    app = FastAPI(title="HELIX Agent Runtime", version="0.1.0")
+    app.state.runtime = runtime
+
+    @app.get("/health")
+    async def health() -> dict:
+        return {
+            "status": "ok",
+            "service": app_settings.service_name,
+            "registeredAgents": len(runtime.registry),
+        }
+
+    @app.get("/agents")
+    async def list_agents() -> list[dict]:
+        return [
+            {
+                "type": agent.agent_type.value,
+                "name": agent.name,
+                "description": agent.description,
+                "version": agent.version,
+                "status": runtime.status_of(agent.agent_type).value,
+                "capabilities": [
+                    {"name": c.name, "description": c.description} for c in agent.capabilities
+                ],
+            }
+            for agent in runtime.registry.values()
+        ]
+
+    @app.post("/agents/{agent_type}/execute")
+    async def execute(agent_type: AgentType, task: AgentTask) -> dict:
+        """Phase 4 manual harness: run one AgentTask on one agent. Agent failures
+        come back as a FAILED task (200), never as a 500."""
+        if agent_type not in runtime.registry:
+            raise HTTPException(404, f"No agent registered for type {agent_type.value}.")
+        if task.agent_type != agent_type:
+            raise HTTPException(
+                422,
+                f"Task agentType {task.agent_type.value} does not match path {agent_type.value}.",
+            )
+        done = await runtime.run(task)
+        return done.model_dump(mode="json", by_alias=True)
+
+    @app.post("/investigations/run")
+    async def run_investigation(request: InvestigationRunRequest) -> dict:
+        """Phase 5: run the Coordinator synchronously and return InvestigationRunResult."""
+        coordinator = runtime.registry.get(AgentType.COORDINATOR)
+        if not isinstance(coordinator, CoordinatorAgent):
+            raise HTTPException(503, "Coordinator agent is not registered.")
+        with runtime.busy(AgentType.COORDINATOR):
+            result = await coordinator.run_investigation(request)
+        return result.model_dump(mode="json", by_alias=True)
+
+    return app
+
+
+app = create_app()
+
+#: Concrete agents registered at startup (COORDINATOR, ANALYTICS), keyed by AgentType.
+AGENT_REGISTRY: dict[AgentType, BaseAgent] = app.state.runtime.registry
+
+__all__ = ["AGENT_REGISTRY", "AgentRuntime", "app", "create_app"]

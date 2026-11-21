@@ -2,7 +2,7 @@
   "name": "@helix/web",
   "version": "0.1.0",
   "private": true,
-  "description": "HELIX web app — dashboard, investigation views, data sources, analytics (presentation only)",
+  "description": "HELIX web app: dashboard, investigation views, data sources, analytics (presentation only)",
   "scripts": {
     "build": "next build",
     "dev": "next dev --turbopack",

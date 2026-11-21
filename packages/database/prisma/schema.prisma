@@ -130,9 +130,10 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  memberships       OrganizationMember[]
-  createdInvestigations Investigation[]     @relation("InvestigationCreatedBy")
-  auditLogs         AuditLog[]
+  memberships           OrganizationMember[]
+  createdInvestigations Investigation[]      @relation("InvestigationCreatedBy")
+  auditLogs             AuditLog[]
+  notifications         Notification[]
 
   @@map("users")
 }
@@ -144,13 +145,14 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members       OrganizationMember[]
-  projects      Project[]
-  dataSources   DataSource[]
+  members        OrganizationMember[]
+  projects       Project[]
+  dataSources    DataSource[]
   investigations Investigation[]
-  metrics       Metric[]
-  anomalies     Anomaly[]
-  auditLogs     AuditLog[]
+  metrics        Metric[]
+  anomalies      Anomaly[]
+  auditLogs      AuditLog[]
+  notifications  Notification[]
 
   @@map("organizations")
 }
@@ -192,36 +194,57 @@ model Project {
 // ---------------------------------------------------------------------------
 
 model DataSource {
-  id               String            @id @default(uuid())
+  id               String           @id @default(uuid())
   organizationId   String
   name             String
   type             DataSourceType
-  status           DataSourceStatus  @default(PENDING)
+  status           DataSourceStatus @default(PENDING)
+  // Human-readable reason for the current status (e.g. the connection error
+  // behind status = ERROR). Never contains secrets.
+  statusMessage    String?
   // Non-secret connection details only (host, port, database name, sync options).
   // Credentials are resolved at connect-time from a secret manager, never stored here.
-  connectionConfig Json              @default("{}")
+  connectionConfig Json             @default("{}")
   lastSyncedAt     DateTime?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
-  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   schemas      DataSourceSchema[]
   metrics      Metric[]
   anomalies    Anomaly[]
+  credential   DataSourceCredential?
 
   @@index([organizationId])
   @@map("data_sources")
 }
 
+// Encrypted credentials for one DataSource (AES-256-GCM, key from
+// HELIX_SECRETS_KEY). Kept in its own table so connectionConfig stays
+// secret-free and so the payload can later move to a real secret manager
+// without touching DataSource.
+model DataSourceCredential {
+  dataSourceId String   @id
+  iv           String
+  authTag      String
+  ciphertext   String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  dataSource DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@map("data_source_credentials")
+}
+
 // Discovered schema of one table/collection within a DataSource (section 2, Data Ingestion).
 model DataSourceSchema {
-  id                String   @id @default(uuid())
-  dataSourceId      String
-  tableName         String
+  id               String   @id @default(uuid())
+  dataSourceId     String
+  tableName        String
   // Array of { name, type, nullable, description? }
-  columns           Json
-  rowCountEstimate  Int?
-  discoveredAt      DateTime @default(now())
+  columns          Json
+  rowCountEstimate Int?
+  discoveredAt     DateTime @default(now())
 
   dataSource DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
 
@@ -234,22 +257,22 @@ model DataSourceSchema {
 // ---------------------------------------------------------------------------
 
 model Investigation {
-  id               String                    @id @default(uuid())
-  organizationId   String
-  projectId        String
-  createdByUserId  String?
-  triggerType      InvestigationTriggerType  @default(USER_QUESTION)
-  question         String
-  status           InvestigationStatus       @default(PENDING)
+  id                 String                   @id @default(uuid())
+  organizationId     String
+  projectId          String
+  createdByUserId    String?
+  triggerType        InvestigationTriggerType @default(USER_QUESTION)
+  question           String
+  status             InvestigationStatus      @default(PENDING)
   // InvestigationPlan produced by the Coordinator; see packages/contracts/src/investigation.ts
-  plan             Json?
-  rootCauseFindingId String?                 @unique
-  summary          String?
-  overallConfidence Float?
-  startedAt        DateTime?
-  completedAt      DateTime?
-  createdAt        DateTime                  @default(now())
-  updatedAt        DateTime                  @updatedAt
+  plan               Json?
+  rootCauseFindingId String?                  @unique
+  summary            String?
+  overallConfidence  Float?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -263,7 +286,7 @@ model Investigation {
   agentTasks       AgentTask[]
   agentMessages    AgentMessage[]
   evidence         Evidence[]
-  findings         Finding[]                @relation("InvestigationFindings")
+  findings         Finding[]            @relation("InvestigationFindings")
   recommendations  Recommendation[]
   contextSnapshots ContextSnapshot[]
 
@@ -276,14 +299,14 @@ model Investigation {
 // One step of the Coordinator's plan (section 13, Investigation Plan). An
 // AgentTask is the execution record of one InvestigationStep.
 model InvestigationStep {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   investigationId String
   order           Int
   agentType       AgentType
   objective       String
   // Order values of steps this one depends on, e.g. [0, 1]
-  dependsOn       Json     @default("[]")
-  createdAt       DateTime @default(now())
+  dependsOn       Json      @default("[]")
+  createdAt       DateTime  @default(now())
 
   investigation Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
   agentTasks    AgentTask[]
@@ -331,22 +354,22 @@ model Agent {
 }
 
 model AgentTask {
-  id                  String            @id @default(uuid())
+  id                  String          @id @default(uuid())
   investigationId     String
   investigationStepId String?
   agentType           AgentType
   agentId             String?
-  status              AgentTaskStatus   @default(QUEUED)
+  status              AgentTaskStatus @default(QUEUED)
   objective           String
   // Context assembled by the Context Engine specifically for this task.
-  inputContext        Json              @default("{}")
+  inputContext        Json            @default("{}")
   result              Json?
   error               String?
   startedAt           DateTime?
   completedAt         DateTime?
-  timeoutMs           Int               @default(60000)
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
+  timeoutMs           Int             @default(60000)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
 
   investigation     Investigation      @relation(fields: [investigationId], references: [id], onDelete: Cascade)
   investigationStep InvestigationStep? @relation(fields: [investigationStepId], references: [id], onDelete: SetNull)
@@ -364,15 +387,15 @@ model AgentTask {
 // A2A message log. fromAgent/toAgent are stored as strings (not a strict FK)
 // because "COORDINATOR" is a logical participant, not a row in Agent.
 model AgentMessage {
-  id              String            @id @default(uuid())
+  id              String           @id @default(uuid())
   type            AgentMessageType
   investigationId String
   agentTaskId     String?
   fromAgent       String
   toAgent         String
-  payload         Json              @default("{}")
+  payload         Json             @default("{}")
   correlationId   String
-  createdAt       DateTime          @default(now())
+  createdAt       DateTime         @default(now())
 
   investigation Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
   agentTask     AgentTask?    @relation(fields: [agentTaskId], references: [id], onDelete: SetNull)
@@ -400,8 +423,8 @@ model Evidence {
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
-  investigation Investigation    @relation(fields: [investigationId], references: [id], onDelete: Cascade)
-  agentTask     AgentTask        @relation(fields: [agentTaskId], references: [id], onDelete: Cascade)
+  investigation Investigation     @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+  agentTask     AgentTask         @relation(fields: [agentTaskId], references: [id], onDelete: Cascade)
   findingLinks  FindingEvidence[]
 
   @@index([investigationId])
@@ -419,7 +442,7 @@ model Finding {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  investigation Investigation @relation("InvestigationFindings", fields: [investigationId], references: [id], onDelete: Cascade)
+  investigation Investigation  @relation("InvestigationFindings", fields: [investigationId], references: [id], onDelete: Cascade)
   // Reverse side of Investigation.rootCauseFinding (see above).
   rootCauseOf   Investigation? @relation("InvestigationRootCause")
 
@@ -501,19 +524,19 @@ model Metric {
 }
 
 model Anomaly {
-  id               String          @id @default(uuid())
-  organizationId   String
-  metricId         String?
-  dataSourceId     String?
-  description      String
-  severity         AnomalySeverity @default(MEDIUM)
-  detectedAt       DateTime        @default(now())
-  detectionMethod  String
-  value            Float
-  expectedValue    Float?
-  deviationScore   Float?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  id              String          @id @default(uuid())
+  organizationId  String
+  metricId        String?
+  dataSourceId    String?
+  description     String
+  severity        AnomalySeverity @default(MEDIUM)
+  detectedAt      DateTime        @default(now())
+  detectionMethod String
+  value           Float
+  expectedValue   Float?
+  deviationScore  Float?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   metric       Metric?      @relation(fields: [metricId], references: [id], onDelete: SetNull)
@@ -531,13 +554,13 @@ model Anomaly {
 // Exactly what context an agent was given for a specific task — required for
 // Investigation Replay and for debugging "why did the agent say that".
 model ContextSnapshot {
-  id              String    @id @default(uuid())
-  investigationId String
-  agentTaskId     String?
-  agentType       AgentType
+  id               String    @id @default(uuid())
+  investigationId  String
+  agentTaskId      String?
+  agentType        AgentType
   assembledContext Json
-  tokenCount      Int?
-  createdAt       DateTime  @default(now())
+  tokenCount       Int?
+  createdAt        DateTime  @default(now())
 
   investigation Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
   agentTask     AgentTask?    @relation(fields: [agentTaskId], references: [id], onDelete: SetNull)
@@ -562,4 +585,24 @@ model AuditLog {
 
   @@index([organizationId, createdAt])
   @@map("audit_logs")
+}
+
+// In-app notification for one user (e.g. "an investigation you created
+// finished"). organizationId is optional so user-level notices are possible.
+model Notification {
+  id             String    @id @default(uuid())
+  userId         String
+  organizationId String?
+  type           String
+  title          String
+  body           String
+  link           String?
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("notifications")
 }

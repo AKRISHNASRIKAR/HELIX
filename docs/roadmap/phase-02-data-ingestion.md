@@ -1,6 +1,6 @@
 # Phase 2: Data Ingestion
 
-**Status:** Not started
+**Status:** ✅ Complete
 **Depends on:** [Phase 1](./phase-01-core-platform.md) — needs real
 `DataSource` records and an authenticated API to attach them to.
 
@@ -70,3 +70,12 @@ phases (analytics, agents) rely on.
 
 [Phase 3: Analytics Engine](./phase-03-analytics-engine.md) — compute real
 numbers over the data this phase can now reach.
+
+## Implementation notes
+
+- Credential storage and CSV upload storage are decided in
+  [ADR-006](../decisions/ADR-006-credentials-and-uploads.md). Credentials are
+  encrypted with AES-256-GCM in `data_source_credentials`, and CSVs go to
+  `HELIX_UPLOAD_DIR`.
+- `DataSource.statusMessage` holds the readable reason when a connection
+  fails.

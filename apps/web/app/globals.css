@@ -17,13 +17,13 @@
   --text-good: #006300;
   --text-bad: #b42828;
 
-  /* Categorical (fixed order) — validated reference palette */
+  /* Categorical (fixed order), validated reference palette */
   --series-1: #2a78d6;
   --series-1-soft: #b7d3f6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
 
-  /* Status — reserved, always paired with icon/label */
+  /* Status: reserved, always paired with icon/label */
   --status-good: #0ca30c;
   --status-warning: #fab219;
   --status-serious: #ec835a;

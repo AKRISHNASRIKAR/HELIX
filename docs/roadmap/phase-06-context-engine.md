@@ -1,6 +1,6 @@
 # Phase 6: Context Engine
 
-**Status:** Not started
+**Status:** 🔜 Next up
 **Depends on:** [Phase 5](./phase-05-coordinator-agent.md) — context
 assembly only matters once there's a real Coordinator/agent flow consuming
 it; building it against a manual harness would risk designing it wrong.

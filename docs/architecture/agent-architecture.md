@@ -8,7 +8,9 @@ requirements — never a direct dependency on another agent's internals.
 
 ## The `BaseAgent` contract
 
-Defined in `services/agent-runtime/app/agents/base.py`:
+Defined in `packages/contracts-py/helix_contracts/agent_base.py` (so agent
+packages under `agents/*` can implement it standalone) and re-exported from
+`services/agent-runtime/app/agents/base.py`:
 
 ```python
 class BaseAgent(ABC):
