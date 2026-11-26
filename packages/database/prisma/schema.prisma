@@ -149,6 +149,7 @@ model Organization {
   projects       Project[]
   dataSources    DataSource[]
   investigations Investigation[]
+  monitors       Monitor[]
   metrics        Metric[]
   anomalies      Anomaly[]
   auditLogs      AuditLog[]
@@ -184,6 +185,7 @@ model Project {
 
   organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   investigations Investigation[]
+  monitors       Monitor[]
 
   @@index([organizationId])
   @@map("projects")
@@ -211,6 +213,7 @@ model DataSource {
 
   organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   schemas      DataSourceSchema[]
+  monitors     Monitor[]
   metrics      Metric[]
   anomalies    Anomaly[]
   credential   DataSourceCredential?
@@ -271,11 +274,19 @@ model Investigation {
   overallConfidence  Float?
   startedAt          DateTime?
   completedAt        DateTime?
+  // Phase 9: the monitor that opened this investigation (ANOMALY_DETECTED only).
+  monitorId          String?
+  // Phase 9: the anomaly that triggered it ({monitorId, metricKey, metricName,
+  // date, direction, severity, value, expectedValue, deviationScore, dataSourceId, table}).
+  triggerContext     Json?
+  // Phase 9: "<monitorId>:<YYYY-MM-DD>:<direction>"; unique so one anomaly opens at most one investigation.
+  dedupeKey          String?                  @unique
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  monitor      Monitor?     @relation(fields: [monitorId], references: [id], onDelete: SetNull)
   createdBy    User?        @relation("InvestigationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   // The finding identified as the root cause, once one is established.
@@ -293,6 +304,7 @@ model Investigation {
   @@index([organizationId])
   @@index([projectId])
   @@index([status])
+  @@index([monitorId])
   @@map("investigations")
 }
 
@@ -605,4 +617,50 @@ model Notification {
 
   @@index([userId, createdAt])
   @@map("notifications")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9: autonomous monitoring
+// ---------------------------------------------------------------------------
+
+// A metric HELIX watches in the background. Each monitoring cycle runs the
+// analytics engine's anomaly detection on its daily series and opens an
+// ANOMALY_DETECTED investigation for a new anomaly at or above minSeverity.
+model Monitor {
+  id              String          @id @default(uuid())
+  organizationId  String
+  projectId       String
+  dataSourceId    String
+  name            String
+  // revenue | orders | refunds | refund_rate | aov | customers | custom
+  metricKey       String
+  tableName       String
+  timeColumn      String
+  valueColumn     String?
+  // sum | mean | count | count_distinct
+  aggregation     String
+  // Optional row filter, same shape as the analytics engine's FilterSpec.
+  filter          Json?
+  unit            String?
+  minSeverity     AnomalySeverity @default(HIGH)
+  // Only anomalies within this many days of the series' last day are considered.
+  lookbackDays    Int             @default(7)
+  cooldownHours   Int             @default(24)
+  enabled         Boolean         @default(true)
+  lastRunAt       DateTime?
+  // ok | anomaly | investigation_opened | deduped | rate_limited | error
+  lastStatus      String?
+  lastMessage     String?
+  createdByUserId String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dataSource     DataSource      @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  investigations Investigation[]
+
+  @@index([organizationId])
+  @@index([enabled])
+  @@map("monitors")
 }

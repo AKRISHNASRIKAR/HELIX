@@ -1,4 +1,14 @@
 from .agent_base import BaseAgent
+from .context import (
+    AssembledContext,
+    ContextAssembleRequest,
+    ContextDecision,
+    ContextFocus,
+    ContextHistory,
+    ContextRequirements,
+    ContextStep,
+    ContextUpstream,
+)
 from .enums import (
     AgentMessageType,
     AgentStatus,
@@ -21,8 +31,10 @@ from .investigation_run import (
     InvestigationRunRequest,
     InvestigationRunResult,
     RunAnomaly,
+    RunContextSnapshot,
     RunEvidence,
     RunFinding,
+    RunMessage,
     RunMetric,
     RunRecommendation,
     RunStatus,
@@ -49,6 +61,16 @@ from .models import (
 
 __all__ = [
     "BaseAgent",
+    "AssembledContext",
+    "ContextAssembleRequest",
+    "ContextDecision",
+    "ContextFocus",
+    "ContextHistory",
+    "ContextRequirements",
+    "ContextStep",
+    "ContextUpstream",
+    "RunContextSnapshot",
+    "RunMessage",
     "AgentMessageType",
     "AgentStatus",
     "AgentTaskStatus",

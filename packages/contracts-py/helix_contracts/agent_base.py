@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from .context import ContextRequirements
 from .enums import AgentType
 from .models import AgentCapability, AgentTask
 
@@ -30,6 +31,10 @@ class BaseAgent(ABC):
     name: str = ""
     description: str = ""
     version: str = "0.1.0"
+
+    #: What services/context-engine should assemble for this agent (Phase 6).
+    #: Subclasses override; the default asks for every connected table.
+    context_requirements: ContextRequirements = ContextRequirements()
 
     @property
     @abstractmethod

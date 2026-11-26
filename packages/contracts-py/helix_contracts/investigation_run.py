@@ -21,6 +21,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from .enums import (
+    AgentMessageType,
     AgentTaskStatus,
     AgentType,
     AnalyticsType,
@@ -82,6 +83,10 @@ class InvestigationRunInvestigation(BaseModel):
     trigger_type: InvestigationTriggerType = Field(
         default=InvestigationTriggerType.USER_QUESTION, alias="triggerType"
     )
+    #: Phase 9: for ANOMALY_DETECTED investigations, the anomaly that triggered
+    #: it ({monitorId, metricKey, metricName, date, direction, severity, value,
+    #: expectedValue, deviationScore, dataSourceId, table}). None otherwise.
+    trigger_context: dict[str, Any] | None = Field(default=None, alias="triggerContext")
 
 
 class InvestigationRunRequest(BaseModel):
@@ -198,6 +203,34 @@ class RunAnomaly(BaseModel):
     deviation_score: float | None = Field(default=None, alias="deviationScore")
 
 
+class RunMessage(BaseModel):
+    """One A2A message (Phase 7), persisted as an AgentMessage row."""
+
+    model_config = _CAMEL
+
+    id: UUID
+    type: AgentMessageType
+    agent_task_id: UUID | None = Field(default=None, alias="agentTaskId")
+    from_agent: str = Field(alias="fromAgent")
+    to_agent: str = Field(alias="toAgent")
+    payload: dict[str, Any] = Field(default_factory=dict)
+    correlation_id: str = Field(alias="correlationId")
+    created_at: datetime = Field(alias="createdAt")
+
+
+class RunContextSnapshot(BaseModel):
+    """The exact context one task received (Phase 6), persisted as a ContextSnapshot row."""
+
+    model_config = _CAMEL
+
+    id: UUID
+    agent_task_id: UUID | None = Field(default=None, alias="agentTaskId")
+    agent_type: AgentType = Field(alias="agentType")
+    assembled_context: dict[str, Any] = Field(alias="assembledContext")
+    token_count: int | None = Field(default=None, alias="tokenCount")
+    created_at: datetime = Field(alias="createdAt")
+
+
 class InvestigationRunResult(BaseModel):
     model_config = _CAMEL
 
@@ -213,3 +246,9 @@ class InvestigationRunResult(BaseModel):
     summary: str | None = None
     overall_confidence: float | None = Field(default=None, ge=0, le=1, alias="overallConfidence")
     root_cause_finding_id: UUID | None = Field(default=None, alias="rootCauseFindingId")
+    messages: list[RunMessage] = Field(default_factory=list)
+    context_snapshots: list[RunContextSnapshot] = Field(
+        default_factory=list, alias="contextSnapshots"
+    )
+    #: Free-form run metadata (planner/summary writer used, LLM model, timings).
+    meta: dict[str, Any] = Field(default_factory=dict)
