@@ -1,12 +1,15 @@
-"""Shared builders: a fake ANALYTICS result shaped like helix_agent_analytics output."""
+"""Shared builders: fake agent results (Phase 5 single ANALYTICS shape and the
+Phase 7 multi-agent orders ground truth from helix_root_cause.testing)."""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from helix_contracts import AgentTask, AgentTaskStatus, InvestigationRunRequest
+from helix_contracts import AgentTask, AgentTaskStatus, AgentType, InvestigationRunRequest
+from helix_root_cause.testing import RESULT_BUILDERS
 
 NOW = datetime(2026, 10, 15, tzinfo=UTC).isoformat()
 
@@ -106,3 +109,83 @@ def run_request() -> InvestigationRunRequest:
             ]}],
         }],
     })
+
+
+# ---------------------------------------------------------------------------
+# Multi-agent (Phase 7) builders: the orders ground truth from helix_root_cause.
+# ---------------------------------------------------------------------------
+
+DOMAIN = {AgentType.ANALYTICS, AgentType.FINANCE, AgentType.CUSTOMER, AgentType.PRODUCT}
+
+
+def orders_source() -> dict:
+    return {
+        "id": str(uuid4()), "name": "Orders", "type": "CSV",
+        "schemas": [{"tableName": "orders", "rowCountEstimate": 10, "columns": [
+            {"name": "created_at", "type": "timestamp", "nullable": False,
+             "semanticType": "datetime"},
+            {"name": "channel", "type": "string", "nullable": False,
+             "semanticType": "categorical"},
+            {"name": "amount", "type": "float", "nullable": False, "semanticType": "currency"},
+        ]}],
+    }
+
+
+def deployments_source() -> dict:
+    return {
+        "id": str(uuid4()), "name": "Deployments", "type": "MCP",
+        "schemas": [{"tableName": "deployments", "rowCountEstimate": 40, "columns": [
+            {"name": "deployed_at", "type": "timestamp", "nullable": False,
+             "semanticType": "datetime"},
+            {"name": "service", "type": "string", "nullable": False,
+             "semanticType": "categorical"},
+        ]}],
+    }
+
+
+def make_request(question="Why did revenue drop last week?", *, sources=None,
+                 trigger_type="USER_QUESTION", trigger_context=None) -> InvestigationRunRequest:
+    return InvestigationRunRequest.model_validate({
+        "investigation": {
+            "id": str(uuid4()), "organizationId": str(uuid4()), "projectId": str(uuid4()),
+            "question": question, "triggerType": trigger_type,
+            "triggerContext": trigger_context,
+        },
+        "dataSources": sources if sources is not None else [orders_source(),
+                                                            deployments_source()],
+    })
+
+
+@pytest.fixture
+def multi_request() -> InvestigationRunRequest:
+    return make_request()
+
+
+def ground_truth_dispatch(*, fail=(), delays=None, seen=None, transport=None, messages=None):
+    """Dispatch that answers each domain agent with its ground-truth result.
+    `fail`: agent types that come back FAILED. `delays`: seconds per agent type.
+    `seen`: list collecting (event, agentType, monotonic time) tuples."""
+    delays = delays or {}
+
+    async def dispatch(task: AgentTask) -> AgentTask:
+        agent = task.agent_type.value
+        if seen is not None:
+            seen.append(("start", agent, asyncio.get_running_loop().time(), task))
+        await asyncio.sleep(delays.get(agent, 0))
+        if seen is not None:
+            seen.append(("end", agent, asyncio.get_running_loop().time(), task))
+        task.started_at = datetime.now(UTC)
+        task.completed_at = datetime.now(UTC)
+        if agent in fail:
+            task.status = AgentTaskStatus.FAILED
+            task.error = f"{agent} exploded"
+            return task
+        task.status = AgentTaskStatus.SUCCEEDED
+        task.result = RESULT_BUILDERS[agent](str(task.id))
+        if transport:
+            task.result["transport"] = transport
+        if messages is not None:
+            task.result["_messages"] = messages(task)
+        return task
+
+    return dispatch

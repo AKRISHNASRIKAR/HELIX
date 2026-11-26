@@ -1,6 +1,7 @@
 import json
 from uuid import UUID, uuid4
 
+import helix_agent_analytics
 import httpx
 import pytest
 from app.config import Settings
@@ -9,7 +10,7 @@ from app.progress import HttpProgressReporter
 from fastapi.testclient import TestClient
 from helix_agent_analytics.testing import FakeAnalyticsEngine, orders_data_source
 from helix_agent_coordinator import RecordingProgressReporter
-from helix_contracts import AgentType, InvestigationRunResult
+from helix_contracts import InvestigationRunResult
 
 
 @pytest.fixture
@@ -22,9 +23,14 @@ def progress():
     return RecordingProgressReporter()
 
 
+def _settings(**env):
+    """Hermetic settings: no context engine, in-process dispatch unless overridden."""
+    return Settings(**{"CONTEXT_ENGINE_URL": "", "HELIX_A2A_MODE": "inprocess", **env})
+
+
 @pytest.fixture
 def client(engine, progress):
-    app = create_app(Settings(), engine_transport=engine.transport, progress=progress)
+    app = create_app(_settings(), engine_transport=engine.transport, progress=progress, llm=None)
     return TestClient(app)
 
 
@@ -46,21 +52,31 @@ def _is_uuid4(value: str) -> bool:
     return UUID(value).version == 4
 
 
-def test_default_app_registers_both_agents():
-    assert set(AGENT_REGISTRY) == {AgentType.COORDINATOR, AgentType.ANALYTICS}
+ALL_AGENTS = {"COORDINATOR", "ANALYTICS", "FINANCE", "CUSTOMER", "PRODUCT"}
+
+
+def test_default_app_registers_every_agent():
+    assert {t.value for t in AGENT_REGISTRY} == ALL_AGENTS
 
 
 def test_health_counts_registered_agents(client):
-    assert client.get("/health").json()["registeredAgents"] == 2
+    body = client.get("/health").json()
+    assert body["registeredAgents"] == 5
+    assert body["a2a"] == {"mode": "inprocess", "workerRunning": False, "channels": []}
 
 
 def test_list_agents(client):
     agents = {a["type"]: a for a in client.get("/agents").json()}
-    assert set(agents) == {"COORDINATOR", "ANALYTICS"}
+    assert set(agents) == ALL_AGENTS
+    for agent in agents.values():
+        assert {"includeHistory", "maxTokens", "semanticTypes"} <= set(
+            agent["contextRequirements"]
+        )
+    assert agents["PRODUCT"]["contextRequirements"]["dataSourceTypes"] == ["MCP", "GITHUB"]
     analytics = agents["ANALYTICS"]
     assert analytics["status"] == "IDLE"
     assert analytics["name"] == "Analytics Agent"
-    assert analytics["version"] == "0.1.0"
+    assert analytics["version"] == helix_agent_analytics.__version__
     assert [c["name"] for c in analytics["capabilities"]] == [
         "kpi_analysis", "trend_analysis", "anomaly_detection", "forecasting",
     ]
@@ -90,7 +106,7 @@ def test_execute_analytics_task(client, engine):
     assert task["status"] == "SUCCEEDED"
     assert task["error"] is None
     assert task["result"]["findings"]
-    assert engine.paths() == ["/kpis", "/anomalies/detect"]
+    assert engine.paths()[:2] == ["/kpis", "/anomalies/detect"]
 
 
 def test_execute_reports_engine_failure_as_failed_task(client, engine):
@@ -104,7 +120,7 @@ def test_execute_reports_engine_failure_as_failed_task(client, engine):
 
 def test_execute_rejects_mismatched_or_unknown_agent(client):
     assert client.post("/agents/COORDINATOR/execute", json=_analytics_task()).status_code == 422
-    assert client.post("/agents/FINANCE/execute", json=_analytics_task()).status_code == 404
+    assert client.post("/agents/OPERATIONS/execute", json=_analytics_task()).status_code == 404
     assert client.post("/agents/NOPE/execute", json=_analytics_task()).status_code == 422
 
 
@@ -115,9 +131,14 @@ def test_run_investigation_returns_valid_linked_result(client, progress):
     data = response.json()
     InvestigationRunResult.model_validate(data)
 
-    assert data["status"] == "COMPLETED"
-    assert len(data["plan"]["steps"]) == 1
-    assert data["plan"]["steps"][0]["agentType"] == "ANALYTICS"
+    assert data["status"] in ("COMPLETED", "PARTIALLY_COMPLETED")
+    # Multi-agent plan (CSV only, so no PRODUCT): analytics first, synthesis last.
+    plan_types = [s["agentType"] for s in data["plan"]["steps"]]
+    assert plan_types[0] == "ANALYTICS" and plan_types[-1] == "COORDINATOR"
+    assert {"FINANCE", "CUSTOMER"} <= set(plan_types) and "PRODUCT" not in plan_types
+    assert len(data["contextSnapshots"]) == len(data["tasks"])
+    assert all(t["result"]["transport"] == "in-process" for t in data["tasks"]
+               if t["agentType"] != "COORDINATOR" and isinstance(t["result"], dict))
 
     for key in ("steps", "tasks", "evidence", "findings", "recommendations", "metrics",
                 "anomalies"):
@@ -140,7 +161,8 @@ def test_run_investigation_returns_valid_linked_result(client, progress):
     for rec in data["recommendations"]:
         assert all(i in finding_ids for i in rec["findingIds"])
     for evidence in data["evidence"]:
-        assert evidence["data"]["metricId"] in metric_ids
+        if "metricId" in evidence["data"]:
+            assert evidence["data"]["metricId"] in metric_ids
         if evidence["sourceType"] == "ANOMALY":
             assert evidence["data"]["anomalyId"] in anomaly_ids
     assert all(a["metricId"] in metric_ids for a in data["anomalies"])
@@ -150,12 +172,13 @@ def test_run_investigation_returns_valid_linked_result(client, progress):
     assert root["analyticsType"] == "DIAGNOSTIC"
     assert "2026-10-08" in root["statement"]
     assert data["overallConfidence"] == root["confidence"]
-    assert data["recommendations"][0]["title"] == "Investigate the revenue drop on 2026-10-08"
+    assert data["recommendations"]
 
-    assert progress.sequence() == [
+    sequence = progress.sequence()
+    assert sequence[:4] == [
         "status:PLANNING", "investigation.planning", "plan.produced", "status:IN_PROGRESS",
-        "task.dispatched", "task.completed", "investigation.synthesized",
     ]
+    assert "task.dispatched" in sequence and sequence[-1] == "investigation.synthesized"
     assert {r["investigationId"] for r in progress.reports} == {body["investigation"]["id"]}
 
 

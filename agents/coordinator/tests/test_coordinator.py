@@ -1,3 +1,5 @@
+"""Phase 5 behaviour: the single-agent (ANALYTICS only) path still works."""
+
 import asyncio
 from uuid import UUID, uuid4
 
@@ -11,13 +13,14 @@ from helix_contracts import (
 )
 
 
-def test_plan_has_exactly_one_analytics_step(run_request):
+def test_default_plan_is_analytics_plus_synthesis(run_request):
     plan = build_plan(run_request.investigation.question, run_request.data_sources)
-    assert len(plan.steps) == 1
-    step = plan.steps[0]
-    assert (step.order, step.agent_type, step.depends_on) == (1, "ANALYTICS", [])
-    assert "Why did revenue drop last week?" in step.objective
+    assert [(s.order, s.agent_type, s.depends_on) for s in plan.steps] == [
+        (0, "ANALYTICS", []), (1, "COORDINATOR", [0]),
+    ]
+    assert "Why did revenue drop last week?" in plan.steps[0].objective
     assert "1 connected data source" in plan.reasoning
+    assert plan.reasoning.startswith("Planner: rules.")
 
 
 async def test_completed_run_selects_root_cause_and_links_everything(run_request):
@@ -39,9 +42,11 @@ async def test_completed_run_selects_root_cause_and_links_everything(run_request
     assert seen[0].agent_type == AgentType.ANALYTICS
 
     assert result.status == "COMPLETED"
-    assert len(result.steps) == len(result.tasks) == 1
-    assert result.tasks[0].step_id == result.steps[0].id
-    assert result.tasks[0].status == AgentTaskStatus.SUCCEEDED
+    assert len(result.steps) == len(result.tasks) == 2
+    assert [t.step_id for t in result.tasks] == [s.id for s in result.steps]
+    assert [t.status for t in result.tasks] == [AgentTaskStatus.SUCCEEDED] * 2
+    assert result.tasks[1].agent_type == AgentType.COORDINATOR
+    assert result.meta["rootCauseMethod"] == "phase5"
 
     root = next(f for f in result.findings if f.id == result.root_cause_finding_id)
     assert root.is_root_cause and root.confidence == 0.999
@@ -70,8 +75,8 @@ async def test_progress_events_order(run_request):
         "status:PLANNING", "investigation.planning",
         "plan.produced",
         "status:IN_PROGRESS",
-        "task.dispatched",
-        "task.completed",
+        "context.assembled", "task.dispatched", "task.completed",
+        "context.assembled", "task.dispatched", "task.completed",  # synthesis task
         "investigation.synthesized",
     ]
     reports = progress.reports
@@ -79,10 +84,15 @@ async def test_progress_events_order(run_request):
     assert reports[0]["eventType"] == "investigation.planning"
     assert reports[1]["payload"]["plan"]["steps"][0]["agentType"] == "ANALYTICS"
     assert reports[2] == {**reports[2], "status": "IN_PROGRESS", "eventType": None}
-    assert reports[3]["payload"]["taskId"] == str(result.tasks[0].id)
-    assert reports[3]["payload"]["agentType"] == "ANALYTICS"
-    assert reports[4]["payload"] == {"taskId": str(result.tasks[0].id), "findings": 2}
-    assert reports[5]["payload"] == {
+    assert reports[3]["payload"] == {
+        "taskId": str(result.tasks[0].id), "agentType": "ANALYTICS", "source": "fallback",
+        "tokenCount": result.context_snapshots[0].token_count,
+    }
+    assert reports[4]["payload"]["taskId"] == str(result.tasks[0].id)
+    assert reports[4]["payload"]["agentType"] == "ANALYTICS"
+    assert reports[5]["payload"] == {"taskId": str(result.tasks[0].id), "findings": 2}
+    assert reports[6]["payload"]["source"] == "coordinator"
+    assert reports[-1]["payload"] == {
         "status": "COMPLETED",
         "overallConfidence": 0.999,
         "rootCauseFindingId": str(result.root_cause_finding_id),
@@ -129,10 +139,10 @@ async def test_partially_completed_when_one_of_two_steps_fails(run_request, monk
     from helix_agent_coordinator import agent as agent_module
     from helix_contracts import InvestigationPlan, InvestigationPlanStep
 
-    def two_step_plan(question, data_sources):
+    def two_step_plan(question, data_sources, **_):
         return InvestigationPlan(steps=[
-            InvestigationPlanStep(order=1, agentType="ANALYTICS", objective="a"),
-            InvestigationPlanStep(order=2, agentType="ANALYTICS", objective="b"),
+            InvestigationPlanStep(order=0, agentType="ANALYTICS", objective="a"),
+            InvestigationPlanStep(order=1, agentType="ANALYTICS", objective="b"),
         ])
 
     monkeypatch.setattr(agent_module, "build_plan", two_step_plan)
@@ -144,7 +154,12 @@ async def test_partially_completed_when_one_of_two_steps_fails(run_request, monk
 
     result = await CoordinatorAgent(dispatch).run_investigation(run_request)
     assert result.status == "PARTIALLY_COMPLETED"
-    assert [t.status for t in result.tasks] == [AgentTaskStatus.SUCCEEDED, AgentTaskStatus.FAILED]
+    assert [t.status for t in result.tasks] == [
+        AgentTaskStatus.SUCCEEDED, AgentTaskStatus.FAILED, AgentTaskStatus.SUCCEEDED,
+    ]
+    assert [m.type for m in result.messages if m.agent_task_id == result.tasks[1].id] == [
+        "TASK_REQUEST", "ERROR",
+    ]
     assert "boom" in result.tasks[1].error
     assert result.summary.startswith("Partially completed: 1 of 2 agent task(s) failed")
     assert result.root_cause_finding_id is not None
@@ -154,9 +169,10 @@ async def test_dependent_step_is_skipped_when_dependency_fails(run_request, monk
     from helix_agent_coordinator import agent as agent_module
     from helix_contracts import InvestigationPlan, InvestigationPlanStep
 
-    monkeypatch.setattr(agent_module, "build_plan", lambda q, d: InvestigationPlan(steps=[
-        InvestigationPlanStep(order=1, agentType="ANALYTICS", objective="a"),
-        InvestigationPlanStep(order=2, agentType="ANALYTICS", objective="b", dependsOn=[1]),
+    monkeypatch.setattr(agent_module, "build_plan", lambda q, d, **_: InvestigationPlan(steps=[
+        InvestigationPlanStep(order=0, agentType="ANALYTICS", objective="a"),
+        InvestigationPlanStep(order=1, agentType="ANALYTICS", objective="b", dependsOn=[0]),
+        InvestigationPlanStep(order=2, agentType="COORDINATOR", objective="s", dependsOn=[0, 1]),
     ]))
 
     async def dispatch(task):
@@ -167,6 +183,10 @@ async def test_dependent_step_is_skipped_when_dependency_fails(run_request, monk
     result = await CoordinatorAgent(dispatch).run_investigation(run_request)
     assert result.status == "FAILED"
     assert result.tasks[1].status == AgentTaskStatus.SKIPPED
+    assert result.tasks[2].status == AgentTaskStatus.SKIPPED  # nothing to synthesize
+    # A skipped task is never dispatched, so it has no messages or snapshot.
+    assert {m.agent_task_id for m in result.messages} == {result.tasks[0].id}
+    assert [s.agent_task_id for s in result.context_snapshots] == [result.tasks[0].id]
 
 
 async def test_dispatch_timeout_marks_task_timed_out(run_request):

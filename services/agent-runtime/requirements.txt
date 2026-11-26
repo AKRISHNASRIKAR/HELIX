@@ -4,6 +4,12 @@ pydantic==2.10.4
 pydantic-settings==2.7.0
 redis==5.2.1
 httpx==0.28.1
+fakeredis==2.26.2
 -e ../../packages/contracts-py
+-e ../../packages/llm-py
+-e ../../analytics/root-cause
 -e ../../agents/analytics
 -e ../../agents/coordinator
+-e ../../agents/finance
+-e ../../agents/customer
+-e ../../agents/product
