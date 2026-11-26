@@ -51,6 +51,11 @@ Coordinator
 
 ## Status
 
-Not implemented — `services/a2a-gateway` currently only exposes a health
-check. Real routing arrives in Phase 7, once the Coordinator (Phase 5) and a
-second agent exist to actually exchange messages.
+Implemented in Phase 7 (see ADR-008). `services/a2a-gateway` routes
+TASK_REQUEST messages over Redis pub/sub (`helix:a2a:agent:<TYPE>`) and waits
+for the TASK_RESULT or ERROR on `helix:a2a:reply:<correlationId>`. A worker in
+`services/agent-runtime` serves every registered domain agent. When the
+gateway or Redis is unavailable, dispatch falls back to an in-process call and
+the transport is recorded. Every message is stored as an `AgentMessage` row.
+Pub/sub fans out, so running two runtime replicas of the same agent type is
+not supported yet (Redis Streams consumer groups are the upgrade).

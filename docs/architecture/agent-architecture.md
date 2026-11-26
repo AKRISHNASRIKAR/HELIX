@@ -44,8 +44,13 @@ investigation (project brief, section 20).
 4. **Customer, Product, Operations, Visualization** — added after, in that
    rough order, as `docs/decisions/ADR-003-agent-architecture.md` explains.
 
-Only READMEs exist for unimplemented agents today — see each `agents/*/README.md`
-for what it will own and when.
+Coordinator, Analytics, Finance, Customer and Product are implemented
+(Phases 4, 5 and 7). Finance covers refunds, payment failures by channel and
+refund/revenue correlation; Customer covers active customers and whether the
+customer segment mix explains a move; Product aligns deploys and releases from
+MCP or GitHub sources with anomaly days. Operations and Visualization still
+exist only as READMEs. Each agent declares `context_requirements` for the
+context engine (ADR-008).
 
 ## A2A (agent-to-agent communication)
 
@@ -66,5 +71,8 @@ Every `AgentTask`, `AgentMessage`, `ContextSnapshot`, and `InvestigationEvent`
 is persisted, so an investigation's full reasoning chain — question → trigger
 → per-agent findings → root cause → recommendation — can be reconstructed and
 displayed later. This is what makes HELIX's conclusions auditable rather than
-a black box (project brief, sections 14–15). No replay UI exists yet
-(Phase 10); only the schema that will support it exists today.
+a black box (project brief, sections 14 and 15). Since Phase 10 the API's
+`GET /investigations/:id/trace` returns that whole chain plus an evidence
+graph, and the investigation page shows it in the Replay (step-through
+player), Evidence graph and Trace (context snapshots, decisions, messages)
+tabs.

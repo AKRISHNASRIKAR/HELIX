@@ -46,12 +46,16 @@ LLM interpretation (turns the structured result into a Finding statement)
 
 ## Status
 
-Implemented in Phase 3. `services/analytics-engine` exposes `POST /kpis`
-(with Welch t-test p-values), `/statistics`, `/trends`, `/anomalies/detect`
-and `/forecast`. Datasets are passed inline or loaded through
-`services/ingestion-service`'s `/extract`. Detection lives in
-`analytics/anomaly-detection` (robust z-score, IQR, STL seasonal residuals)
-and forecasting in `analytics/forecasting` (ETS and ARIMA baselines with a
-holdout backtest). Every result carries a non-empty `computationMethod`.
-Ground-truth tests run against `tests/fixtures/orders.csv`. Correlation,
-segmentation and root-cause analytics remain Phase 10 work.
+Implemented in Phase 3 and extended in Phase 10. `services/analytics-engine`
+exposes `POST /kpis` (with Welch t-test p-values), `/statistics`, `/trends`,
+`/anomalies/detect`, `/forecast`, and the diagnostic endpoints
+`/segments/compare` (which slice of a dimension explains a day's move,
+`analytics/segmentation`), `/correlation` (lagged Spearman or Pearson,
+`analytics/correlation`) and `/events/align` (deploys and releases near
+anomaly days, `analytics/correlation`). Datasets are passed inline or loaded
+through `services/ingestion-service`'s `/extract`. Detection lives in
+`analytics/anomaly-detection` and forecasting in `analytics/forecasting`.
+Root-cause ranking (`analytics/root-cause`) combines agents' evidence inside
+the Coordinator (ADR-010). Every result carries a non-empty
+`computationMethod`, and ground-truth tests run against
+`tests/fixtures/orders.csv`.

@@ -29,6 +29,26 @@
         ]
       }
     },
+    "/api/v1/notifications/unread-count": {
+      "get": {
+        "operationId": "NotificationsController_unreadCount",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Number of the current user's unread notifications (all orgs)",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
     "/api/v1/notifications/read-all": {
       "post": {
         "operationId": "NotificationsController_readAll",
@@ -843,7 +863,7 @@
         ]
       },
       "post": {
-        "description": "Stores credentials encrypted, then attempts a connection. Responds 201 either way; status is CONNECTED (schemas discovered) or ERROR (statusMessage explains why).",
+        "description": "`type` selects the config shape (missing type = POSTGRESQL). Stores credentials encrypted, then attempts a connection. Responds 201 either way; status is CONNECTED (schemas discovered) or ERROR (statusMessage explains why).",
         "operationId": "DataSourcesController_create",
         "parameters": [
           {
@@ -861,76 +881,196 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 200
-                  },
-                  "type": {
-                    "type": "string",
-                    "enum": [
-                      "POSTGRESQL"
-                    ]
-                  },
-                  "config": {
+                "anyOf": [
+                  {
                     "type": "object",
                     "properties": {
-                      "host": {
+                      "name": {
                         "type": "string",
-                        "minLength": 1
+                        "minLength": 1,
+                        "maxLength": 200
                       },
-                      "port": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 65535,
-                        "default": 5432
-                      },
-                      "database": {
+                      "type": {
                         "type": "string",
-                        "minLength": 1
+                        "enum": [
+                          "POSTGRESQL"
+                        ]
                       },
-                      "schema": {
-                        "type": "string",
-                        "minLength": 1
+                      "config": {
+                        "type": "object",
+                        "properties": {
+                          "host": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "port": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 65535,
+                            "default": 5432
+                          },
+                          "database": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "schema": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "sslmode": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "host",
+                          "database"
+                        ],
+                        "additionalProperties": false
                       },
-                      "sslmode": {
-                        "type": "string",
-                        "minLength": 1
+                      "credentials": {
+                        "type": "object",
+                        "properties": {
+                          "user": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "password": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "user",
+                          "password"
+                        ],
+                        "additionalProperties": true
                       }
                     },
                     "required": [
-                      "host",
-                      "database"
+                      "name",
+                      "type",
+                      "config",
+                      "credentials"
                     ],
                     "additionalProperties": false
                   },
-                  "credentials": {
+                  {
                     "type": "object",
                     "properties": {
-                      "user": {
-                        "type": "string",
-                        "minLength": 1
+                      "name": {
+                        "$ref": "#/anyOf/0/properties/name"
                       },
-                      "password": {
-                        "type": "string"
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "MCP"
+                        ]
+                      },
+                      "config": {
+                        "type": "object",
+                        "properties": {
+                          "serverUrl": {
+                            "type": "string",
+                            "format": "uri"
+                          },
+                          "transport": {
+                            "type": "string",
+                            "enum": [
+                              "streamable_http"
+                            ],
+                            "default": "streamable_http"
+                          },
+                          "toolPrefixes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "minItems": 1
+                          }
+                        },
+                        "required": [
+                          "serverUrl"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "credentials": {
+                        "type": "object",
+                        "properties": {
+                          "token": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "additionalProperties": false
                       }
                     },
                     "required": [
-                      "user",
-                      "password"
+                      "name",
+                      "type",
+                      "config"
                     ],
-                    "additionalProperties": true
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "$ref": "#/anyOf/0/properties/name"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "GITHUB"
+                        ]
+                      },
+                      "config": {
+                        "type": "object",
+                        "properties": {
+                          "owner": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 100
+                          },
+                          "repo": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 100
+                          },
+                          "apiUrl": {
+                            "type": "string",
+                            "format": "uri"
+                          }
+                        },
+                        "required": [
+                          "owner",
+                          "repo"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "credentials": {
+                        "type": "object",
+                        "properties": {
+                          "token": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "token"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "type",
+                      "config",
+                      "credentials"
+                    ],
+                    "additionalProperties": false
                   }
-                },
-                "required": [
-                  "name",
-                  "type",
-                  "config",
-                  "credentials"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -945,7 +1085,7 @@
             "bearer": []
           }
         ],
-        "summary": "Register a Postgres data source",
+        "summary": "Register a POSTGRESQL, MCP or GITHUB data source",
         "tags": [
           "data-sources"
         ]
@@ -1041,6 +1181,7 @@
         ]
       },
       "patch": {
+        "description": "config is merged into the existing config and validated for the source type; credentials replace the stored ones. POSTGRESQL, MCP and GITHUB only.",
         "operationId": "DataSourcesController_update",
         "parameters": [
           {
@@ -1075,48 +1216,11 @@
                   },
                   "config": {
                     "type": "object",
-                    "properties": {
-                      "host": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "port": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 65535,
-                        "default": 5432
-                      },
-                      "database": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "schema": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "sslmode": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "additionalProperties": false
+                    "additionalProperties": {}
                   },
                   "credentials": {
                     "type": "object",
-                    "properties": {
-                      "user": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "password": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "user",
-                      "password"
-                    ],
-                    "additionalProperties": true
+                    "additionalProperties": {}
                   }
                 },
                 "additionalProperties": false
@@ -1333,6 +1437,12 @@
             "required": false,
             "in": "query",
             "schema": {}
+          },
+          {
+            "name": "triggerType",
+            "required": false,
+            "in": "query",
+            "schema": {}
           }
         ],
         "responses": {
@@ -1501,6 +1611,44 @@
         ]
       }
     },
+    "/api/v1/investigations/{id}/trace": {
+      "get": {
+        "operationId": "InvestigationsController_trace",
+        "parameters": [
+          {
+            "name": "X-Organization-Id",
+            "in": "header",
+            "description": "Organization UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Agent and context trace: plan, tasks, A2A messages, context snapshots, evidence graph",
+        "tags": [
+          "investigations"
+        ]
+      }
+    },
     "/api/v1/agents": {
       "get": {
         "operationId": "AgentsController_list",
@@ -1558,6 +1706,492 @@
         "summary": "Headline counts for the dashboard",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/api/v1/monitors": {
+      "get": {
+        "operationId": "MonitorsController_list",
+        "parameters": [
+          {
+            "name": "X-Organization-Id",
+            "in": "header",
+            "description": "Organization UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Monitors in the organization with their last run and latest investigation",
+        "tags": [
+          "monitors"
+        ]
+      },
+      "post": {
+        "operationId": "MonitorsController_create",
+        "parameters": [
+          {
+            "name": "X-Organization-Id",
+            "in": "header",
+            "description": "Organization UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "dataSourceId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "metricKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "tableName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "timeColumn": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "valueColumn": {
+                    "allOf": [
+                      {
+                        "$ref": "#/properties/timeColumn"
+                      }
+                    ],
+                    "nullable": true
+                  },
+                  "aggregation": {
+                    "type": "string",
+                    "enum": [
+                      "sum",
+                      "mean",
+                      "count",
+                      "count_distinct"
+                    ]
+                  },
+                  "filter": {
+                    "type": "object",
+                    "properties": {
+                      "column": {
+                        "$ref": "#/properties/timeColumn"
+                      },
+                      "op": {
+                        "type": "string",
+                        "enum": [
+                          "eq",
+                          "neq",
+                          "in"
+                        ]
+                      },
+                      "value": {
+                        "anyOf": [
+                          {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              }
+                            ]
+                          },
+                          {
+                            "type": "array",
+                            "items": {
+                              "$ref": "#/properties/filter/properties/value/anyOf/0"
+                            },
+                            "minItems": 1
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "column",
+                      "op",
+                      "value"
+                    ],
+                    "additionalProperties": false,
+                    "nullable": true
+                  },
+                  "unit": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 50,
+                    "nullable": true
+                  },
+                  "minSeverity": {
+                    "type": "string",
+                    "enum": [
+                      "LOW",
+                      "MEDIUM",
+                      "HIGH",
+                      "CRITICAL"
+                    ]
+                  },
+                  "lookbackDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 365
+                  },
+                  "cooldownHours": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2160
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name",
+                  "projectId",
+                  "dataSourceId",
+                  "metricKey",
+                  "tableName",
+                  "timeColumn",
+                  "aggregation"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a monitor on a daily metric of a data source table",
+        "tags": [
+          "monitors"
+        ]
+      }
+    },
+    "/api/v1/monitors/suggestions": {
+      "get": {
+        "operationId": "MonitorsController_suggestions",
+        "parameters": [
+          {
+            "name": "X-Organization-Id",
+            "in": "header",
+            "description": "Organization UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Suggested monitors (revenue, orders, refunds, active customers) for connected tables",
+        "tags": [
+          "monitors"
+        ]
+      }
+    },
+    "/api/v1/monitors/run": {
+      "post": {
+        "operationId": "MonitorsController_runAll",
+        "parameters": [
+          {
+            "name": "X-Organization-Id",
+            "in": "header",
+            "description": "Organization UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Run every enabled monitor of the organization now",
+        "tags": [
+          "monitors"
+        ]
+      }
+    },
+    "/api/v1/monitors/{id}": {
+      "get": {
+        "operationId": "MonitorsController_get",
+        "parameters": [
+          {
+            "name": "X-Organization-Id",
+            "in": "header",
+            "description": "Organization UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One monitor",
+        "tags": [
+          "monitors"
+        ]
+      },
+      "patch": {
+        "operationId": "MonitorsController_update",
+        "parameters": [
+          {
+            "name": "X-Organization-Id",
+            "in": "header",
+            "description": "Organization UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "minSeverity": {
+                    "type": "string",
+                    "enum": [
+                      "LOW",
+                      "MEDIUM",
+                      "HIGH",
+                      "CRITICAL"
+                    ]
+                  },
+                  "lookbackDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 365
+                  },
+                  "cooldownHours": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2160
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rename, enable/disable or tune a monitor",
+        "tags": [
+          "monitors"
+        ]
+      },
+      "delete": {
+        "operationId": "MonitorsController_remove",
+        "parameters": [
+          {
+            "name": "X-Organization-Id",
+            "in": "header",
+            "description": "Organization UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a monitor (ADMIN+); its investigations are kept",
+        "tags": [
+          "monitors"
+        ]
+      }
+    },
+    "/api/v1/monitors/{id}/run": {
+      "post": {
+        "description": "Returns { monitorId, monitorName, status, message, investigationId?, anomaly? } where status is ok | investigation_opened | deduped | rate_limited | error.",
+        "operationId": "MonitorsController_run",
+        "parameters": [
+          {
+            "name": "X-Organization-Id",
+            "in": "header",
+            "description": "Organization UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Run one monitor now",
+        "tags": [
+          "monitors"
+        ]
+      }
+    },
+    "/api/v1/anomalies": {
+      "get": {
+        "operationId": "AnomaliesController_list",
+        "parameters": [
+          {
+            "name": "X-Organization-Id",
+            "in": "header",
+            "description": "Organization UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "1-200, default 50",
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Recent anomalies in the organization, newest first",
+        "tags": [
+          "monitors"
         ]
       }
     }

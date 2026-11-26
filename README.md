@@ -4,7 +4,7 @@
 
 Traditional BI answers "what happened." HELIX is built to eventually answer:
 what happened, why it happened, what evidence supports that conclusion, what
-is likely to happen next, and what should be done about it — via multi-agent
+is likely to happen next, and what should be done about it, via multi-agent
 AI, real statistical/ML analytics, and an explainable evidence trail, not a
 single LLM call over your data.
 
@@ -13,31 +13,37 @@ AI/analytics services, agents, and shared contracts. See
 `docs/architecture/system-overview.md` for the full architecture and
 `docs/decisions/` for why it's built this way.
 
-> **Status:** Phases 0 to 5 complete. A user can connect a data source, ask a
-> question, and get an evidence-backed root cause. See "What has been
-> implemented" below.
+> **Status:** Phases 0 to 10 complete. A user connects data (Postgres, CSV,
+> MCP servers, GitHub), asks a question, and five agents (Coordinator,
+> Analytics, Finance, Customer, Product) work out what happened, where, and
+> what changed, with every number traceable to computed evidence. Monitors can
+> open investigations on their own, and every investigation can be replayed
+> step by step. See "What has been implemented" below.
 
 ## Repository structure
 
 ```
 apps/
-  web/            Next.js — presentation only, no business logic
-  api/            NestJS — auth, orgs, projects, investigations, data sources
+  web/            Next.js: presentation only, no business logic
+  api/            NestJS: auth, orgs, projects, investigations, data sources
 
 services/
   agent-runtime/    Hosts/executes agents behind a shared BaseAgent contract
   analytics-engine/ Real statistical computation (pandas/numpy/scipy/...)
   context-engine/   Assembles per-agent-task context (not "RAG")
-  ingestion-service/ Data source connection, schema discovery, profiling
-  a2a-gateway/      Agent-to-agent message routing
+  ingestion-service/ Data source connection (Postgres, CSV, MCP, GitHub), schema discovery, profiling
+  a2a-gateway/      Agent-to-agent message routing over Redis pub/sub
+  mcp-demo/         Local MCP server serving a seeded deployments feed (for demos and evaluation)
 
-agents/           One package per agent (analytics, coordinator implemented; others are READMEs)
-analytics/        Algorithm libraries analytics-engine composes (anomaly-detection, forecasting implemented)
+agents/           One package per agent (coordinator, analytics, finance, customer, product implemented;
+                  operations and visualization are READMEs)
+analytics/        Algorithm libraries (anomaly-detection, forecasting, segmentation, correlation, root-cause)
 
 packages/
   types/            Shared enums
   contracts/         Shared zod schemas + inferred types (TypeScript)
-  contracts-py/       Pydantic mirror of contracts/ (Python)
+  contracts-py/       Pydantic mirror of contracts/ (Python), plus the context and run-result contracts
+  llm-py/             Optional Claude client used by the Coordinator (planning, summaries)
   config/            Typed env loading (Node)
   logger/            Shared structured logger (Node)
   database/          Prisma schema, migrations, typed client
@@ -46,7 +52,7 @@ packages/
 infrastructure/   Docker, Postgres, Redis, monitoring config
 docs/             Architecture docs, ADRs, research notes, API docs
 scripts/          Bootstrap + cross-language task-runner scripts
-tests/            Cross-cutting e2e tests and shared fixtures
+tests/            Shared fixtures (tests/fixtures) and the evaluation harness (tests/evaluation)
 ```
 
 ## Running HELIX
@@ -58,7 +64,7 @@ tests/            Cross-cutting e2e tests and shared fixtures
   `HELIX_PYTHON` to point at your interpreter)
 - Docker + Docker Compose (for Postgres/Redis, or the whole stack)
 
-### Option A — everything in Docker
+### Option A: everything in Docker
 ```bash
 cp .env.example .env   # fill in real values
 docker compose up
@@ -66,7 +72,7 @@ docker compose up
 Starts Postgres, Redis, and every app/service as containers. Web:
 http://localhost:3000, API: http://localhost:4000/health.
 
-### Option B — infra in Docker, apps via monorepo tooling (recommended for active development)
+### Option B: infra in Docker, apps via monorepo tooling (recommended for active development)
 ```bash
 ./scripts/bootstrap.sh          # installs deps, copies .env, generates Prisma client
 docker compose up -d postgres redis
@@ -77,8 +83,9 @@ This gives hot reload for `apps/web` (Next.js) and `apps/api` (NestJS
 `--watch`), and `uvicorn --reload` for the Python services.
 
 ### Option C: no Docker at all
-Native Postgres (14+) and Redis work just as well. Create the role and
-database once, then use Option B without the `docker compose` step:
+Native Postgres (14+) and Redis work just as well, and this is how the
+project is developed day to day. Create the role and database once, then use
+Option B without the `docker compose` step:
 ```bash
 psql -d postgres -c "CREATE ROLE helix LOGIN PASSWORD 'helix' CREATEDB;"
 psql -d postgres -c "CREATE DATABASE helix OWNER helix;"
@@ -87,14 +94,37 @@ pnpm --filter @helix/database db:migrate:deploy
 DATABASE_URL="postgresql://helix:helix@localhost:5432/helix_test?schema=public" \
   pnpm --filter @helix/database db:migrate:deploy
 ```
+`pnpm dev` then starts everything, including the context engine (8003), the
+A2A gateway (8005) and the demo MCP server (8006). To run one service by hand,
+use its virtualenv, for example
+`cd services/agent-runtime && .venv/bin/uvicorn app.main:app --port 8001`
+(`bash ../../scripts/python-run.sh test` creates the virtualenv the first
+time). If ports 3000 or 4000 are taken, set `API_PORT`, `WEB_APP_URL`,
+`HELIX_API_URL` and `NEXT_PUBLIC_API_URL` to other ports.
 
 ### Try an investigation
-With everything running, sign up at http://localhost:3000, create an
-organization and project, upload `tests/fixtures/orders.csv` under Data
-sources, then ask "Why did revenue drop last week?" The Coordinator and
-Analytics Agent should name the seeded 2026-10-08 revenue drop as the root
-cause within a few seconds. "Why did refunds spike?" finds the seeded refund
-spike. API docs are at http://localhost:4000/docs.
+1. Sign up at http://localhost:3000 and create an organization and project.
+2. Under Data sources, upload `tests/fixtures/orders.csv` (CSV), then add an
+   MCP server at `http://localhost:8006/mcp` (the seeded deployments feed).
+3. Ask "Why did revenue drop last week?" Within a couple of seconds the root
+   cause reads: revenue dropped 38.8% on 2026-10-08 because web orders
+   collapsed, starting shortly after the `web-checkout` v2.14.0 deploy (later
+   rolled back), with refunds spiking on 2026-10-08 and 2026-10-09 and the
+   customer segment mix ruled out.
+4. Open the Replay, Evidence graph and Trace tabs to see the plan, each
+   agent's context and messages, and how every finding is backed.
+5. On Monitoring, add the suggested "Daily revenue" monitor and click Run now:
+   it opens an autonomous investigation for 2026-10-08 (and only once).
+
+API docs are at http://localhost:4000/docs.
+
+### Evaluation
+`python3 tests/evaluation/run_eval.py --api http://localhost:4000` runs the
+seeded scenarios against a live stack and writes
+[docs/research/evaluation-results.md](docs/research/evaluation-results.md):
+root-cause accuracy against `tests/fixtures/ground_truth.json`, numbers in
+findings that cannot be traced to evidence, and latency. Latest run: 24 of 24
+checks, 0 untraced numbers, about 1.2 seconds per investigation.
 
 ### Demo mode
 `HELIX_DEMO=1` on the API (`pnpm --filter @helix/api dev:demo`) and the web
@@ -112,6 +142,7 @@ Every service exposes `GET /health`:
 | context-engine | http://localhost:8003/health |
 | ingestion-service | http://localhost:8004/health |
 | a2a-gateway | http://localhost:8005/health |
+| mcp-demo | http://localhost:8006/health |
 
 ### Common commands
 ```bash
@@ -135,23 +166,27 @@ covers Postgres/Redis connection info, each service's port, `WEB_APP_URL` /
 encryption (`HELIX_SECRETS_KEY`, see ADR-006), CSV storage
 (`HELIX_UPLOAD_DIR`), and service-to-service settings
 (`HELIX_INTERNAL_TOKEN`, `HELIX_API_URL`, `INGESTION_SERVICE_URL`,
-`AGENT_RUNTIME_URL`, `ANALYTICS_ENGINE_URL`). `ANTHROPIC_API_KEY` is a
-placeholder: agent reasoning is deterministic today (ADR-007). The API
+`AGENT_RUNTIME_URL`, `ANALYTICS_ENGINE_URL`, `CONTEXT_ENGINE_URL`,
+`A2A_GATEWAY_URL`, `HELIX_A2A_MODE`), monitoring
+(`HELIX_MONITOR_INTERVAL_MS`, `HELIX_MONITOR_MAX_PER_DAY`, ADR-009) and the
+optional LLM (`ANTHROPIC_API_KEY`, `HELIX_LLM`, `HELIX_LLM_MODEL`, ADR-010:
+without a key the deterministic rules run). The API
 refuses the dev-default secrets when `NODE_ENV=production`. Never commit
 `.env`; only `.env.example` (placeholders only) is tracked.
 
 ## Database schema
 
 Owned entirely by `packages/database/prisma/schema.prisma`, applied via
-Prisma migrations — never hand-edit the database. Current entities: `User`,
+Prisma migrations. Never hand-edit the database. Current entities: `User`,
 `Organization`, `OrganizationMember`, `Project`, `DataSource`,
 `DataSourceSchema`, `DataSourceCredential`, `Investigation`, `InvestigationStep`,
 `InvestigationEvent`, `Agent`, `AgentTask`, `AgentMessage`, `Evidence`,
 `Finding` (+ `FindingEvidence` join), `Recommendation` (+
 `RecommendationFinding` join), `Metric`, `Anomaly`, `ContextSnapshot`,
-`AuditLog`, `Notification`. See `docs/architecture/system-overview.md` for what each owns.
+`Monitor`, `AuditLog`, `Notification`. Since Phase 6 every run also writes
+`AgentMessage` and `ContextSnapshot` rows. See `docs/architecture/system-overview.md` for what each owns.
 
-## What has been implemented (Phases 0 to 5)
+## What has been implemented (Phases 0 to 10)
 
 **Phase 0, foundation.** Monorepo tooling (pnpm, Turborepo, ESLint, Prettier,
 Ruff, pytest), every app and service skeleton, shared zod and Pydantic
@@ -198,40 +233,82 @@ contracts, the full Prisma schema, Docker Compose, architecture docs and ADRs.
   findings, evidence, recommendations, plan steps and the timeline.
 - How execution is split between services is in ADR-007.
 
+**Phase 6, context engine** (`services/context-engine`).
+- Each agent declares what it needs; the engine filters data sources and
+  tables, sets the focus (anomaly days in the question's direction), adds
+  recent history and trims to a token budget.
+- Every task's context is stored as a `ContextSnapshot`, with the reason for
+  each filtering choice (ADR-008).
+
+**Phase 7, multiple agents and A2A** (`agents/finance`, `agents/customer`,
+`agents/product`, `services/a2a-gateway`).
+- Finance: refunds, order volume by channel, refund and revenue correlation.
+- Customer: active customers and whether the customer segment mix explains a move.
+- Product: deploys and releases aligned with anomaly days.
+- Multi-step plans: Analytics first, then the domain agents concurrently, then
+  a synthesis step. Tasks travel over Redis pub/sub with an in-process
+  fallback, and every message is stored (ADR-008).
+- Web: an Agents page with capabilities and context requirements.
+
+**Phase 8, MCP integrations** (`services/ingestion-service`, `services/mcp-demo`).
+- `McpAdapter` turns an MCP server's list tools into tables;
+  `GithubAdapter` reads deployments, releases and commits.
+- Credentials are encrypted like Postgres ones. Web forms for both.
+
+**Phase 9, autonomous investigations** (`apps/api` monitors).
+- Monitors run on a schedule and on demand, open one investigation per
+  serious anomaly (deduplicated, rate limited) and notify the organization.
+- Web: Monitoring page with suggestions, run now, recent anomalies, and a
+  notifications page with an unread badge (ADR-009).
+
+**Phase 10, explainability and replay** (`analytics/segmentation`,
+`analytics/correlation`, `analytics/root-cause`, `apps/web`).
+- Segment comparison, correlation and deploy alignment endpoints.
+- Root causes ranked from all agents' evidence: what, when, where and what
+  changed (ADR-010). Optional Claude for planning and summaries, with a guard
+  against invented numbers.
+- `GET /investigations/:id/trace` and the Replay, Evidence graph and Trace tabs.
+- The evaluation harness in `tests/evaluation`.
+
 ## What has deliberately NOT been implemented yet
 
-- **LLM reasoning.** Agent planning and synthesis are deterministic. They live
-  in isolated modules so an LLM can replace them later (ADR-007).
-- **Phase 6: context engine.** Agent context is still hand-assembled from the
-  question plus connected schemas, and `ContextSnapshot` rows are not written
-  yet.
-- **Later phases:**
-  - Phase 7: Finance/Customer/Product agents and real A2A routing.
-  - Phase 8: MCP adapters.
-  - Phase 9: autonomous, anomaly-triggered investigations.
-  - Phase 10: replay UI, root-cause correlation and the full evaluation run.
+- **A durable job queue.** Investigations and monitor cycles run inside the
+  API process. An API restart mid-run leaves an investigation unfinished, and
+  monitors only run while the API is up (ADR-009).
+- **The LLM path in practice.** It is built and tested with a fake client but
+  has not been run against the live Claude API here; without a key the rules
+  run.
+- **Scaling A2A.** Redis pub/sub fans out, so two runtime replicas of one agent
+  type would both run a task (ADR-008).
+- **Operations and Visualization agents** (READMEs only), cross-organization
+  correlation, autonomous actions (HELIX never acts on its own), and
+  editing or annotating past investigations.
+- **Real-world sources.** The GitHub adapter is tested only against mocked HTTP.
 - **Smaller gaps:**
-  - A durable job queue for investigation runs.
   - Password reset/SSO.
-  - Notifications UI.
   - Editing data sources, members and projects in the web app (the API
     supports most of it).
   - Observability (`infrastructure/monitoring` is still a placeholder).
 
 ## Roadmap
 
-The full phase-by-phase build plan — what ships in each phase, what's
+The full phase-by-phase build plan (what ships in each phase, what's
 deliberately deferred, where the work lands in this repo, and what unlocks
-next — lives in [`docs/roadmap/`](docs/roadmap/README.md), with one file per
+next) lives in [`docs/roadmap/`](docs/roadmap/README.md), with one file per
 phase. That directory's status table is the source of truth for "what phase
 are we in"; keep it updated as phases complete.
 
-## Recommended next phase
+## Recommended next steps
 
-**[Phase 6: Context Engine](docs/roadmap/phase-06-context-engine.md).**
-Replace the hand-assembled agent context with `services/context-engine`, and
-persist a `ContextSnapshot` for every task. It should land before Phase 7
-adds more agents, so new agents get properly scoped context from day one.
+The ten-phase roadmap is complete. In order of value:
+1. **Durable runs:** move investigations and monitor cycles onto a queue
+   (BullMQ on Redis) so restarts and multiple API instances are safe.
+2. **Real sources:** connect a real GitHub repository and a production-like
+   Postgres database, and add evaluation scenarios built from them.
+3. **Measure the LLM path:** run the evaluation with `ANTHROPIC_API_KEY` set
+   and compare accuracy, untraced numbers, latency and cost against the rules.
+4. **Feedback:** let users mark a root cause right or wrong, and use that to
+   tune the ranking weights in ADR-010.
 
 ## Contributing
 

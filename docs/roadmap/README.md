@@ -26,25 +26,28 @@ adapted to reference the actual repository as it exists today.
 | 3 | Analytics Engine | ✅ Complete | [phase-03-analytics-engine.md](./phase-03-analytics-engine.md) |
 | 4 | First AI Agent (Analytics) | ✅ Complete | [phase-04-first-agent.md](./phase-04-first-agent.md) |
 | 5 | Coordinator Agent | ✅ Complete | [phase-05-coordinator-agent.md](./phase-05-coordinator-agent.md) |
-| 6 | Context Engine | 🔜 Next up | [phase-06-context-engine.md](./phase-06-context-engine.md) |
-| 7 | Multiple Agents + A2A | Not started | [phase-07-multi-agent-a2a.md](./phase-07-multi-agent-a2a.md) |
-| 8 | MCP Integrations | Not started | [phase-08-mcp.md](./phase-08-mcp.md) |
-| 9 | Autonomous Investigations | Not started | [phase-09-autonomous-investigations.md](./phase-09-autonomous-investigations.md) |
-| 10 | Explainability + Replay | Not started | [phase-10-explainability-replay.md](./phase-10-explainability-replay.md) |
+| 6 | Context Engine | ✅ Complete | [phase-06-context-engine.md](./phase-06-context-engine.md) |
+| 7 | Multiple Agents + A2A | ✅ Complete | [phase-07-multi-agent-a2a.md](./phase-07-multi-agent-a2a.md) |
+| 8 | MCP Integrations | ✅ Complete | [phase-08-mcp.md](./phase-08-mcp.md) |
+| 9 | Autonomous Investigations | ✅ Complete | [phase-09-autonomous-investigations.md](./phase-09-autonomous-investigations.md) |
+| 10 | Explainability + Replay | ✅ Complete | [phase-10-explainability-replay.md](./phase-10-explainability-replay.md) |
 
 Update the status column (and each phase file's own status line) as work lands
 — this table should always match reality, not the original plan.
 
 ## How to use this when picking up work
 
-1. Read the phase whose status is "Next up" — it lists exactly what to build
-   and, just as importantly, what *not* to build yet.
-2. Check its "Depends on" section against the phases already marked complete.
-3. When the phase is done, flip its status here and in the phase file, update
-   the root `README.md`'s "What has been implemented" / "Recommended next
-   phase" sections to match, and add an ADR under `docs/decisions/` for any
-   non-trivial choice made along the way.
-4. Move the status marker to the next phase.
+All ten phases are complete, so there is no "Next up" phase. Post-roadmap
+work (a durable job queue for investigation runs, real GitHub/MCP sources,
+an LLM evaluation run with a real API key, feedback on past investigations)
+is listed in the root `README.md` under "Recommended next steps" and in
+`docs/research/future-work.md`. When picking one up:
+
+1. Add a phase-style file here for it (what ships, what is deliberately not
+   done, where the work lands, definition of done) and a row in the table.
+2. When it is done, flip its status here and in its file, update the root
+   `README.md`'s "What has been implemented" section, and add an ADR under
+   `docs/decisions/` for any non-trivial choice made along the way.
 
 ## Why phases are ordered this way
 

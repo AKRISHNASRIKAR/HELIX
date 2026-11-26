@@ -1,6 +1,6 @@
 # Phase 7: Multiple Agents + A2A
 
-**Status:** Not started
+**Status:** ✅ Complete
 **Depends on:** [Phase 6](./phase-06-context-engine.md) — new agents should
 get properly-scoped context from day one, not the manual approach Phases 4–5
 used temporarily.
@@ -75,3 +75,29 @@ produce genuinely multi-step plans.
 [Phase 8: MCP Integrations](./phase-08-mcp.md) — give agents more (and more
 varied) data sources to reach through, now that the multi-agent flow is
 proven.
+
+## Implementation notes
+
+- Finance (`agents/finance`), Customer (`agents/customer`) and Product
+  (`agents/product`) shipped together. All are rule-based, reuse the
+  Analytics Agent's engine client and planner helpers, and get every number
+  from the analytics engine (ADR-005). Operations and Visualization remain
+  READMEs.
+- The Coordinator's rules planner picks agents from the question or trigger.
+  For "Why did revenue drop last week?" the plan is ANALYTICS as step 0;
+  FINANCE, CUSTOMER and PRODUCT depending on it and running concurrently;
+  and a final COORDINATOR synthesis step depending on all of them. Steps run
+  in waves with `asyncio.gather`.
+- `services/a2a-gateway` (port 8005) routes TASK_REQUEST messages over Redis
+  pub/sub (`helix:a2a:agent:{TYPE}`, replies on
+  `helix:a2a:reply:{correlationId}`). agent-runtime runs a worker that
+  subscribes for every registered domain agent. Dispatch falls back to
+  in-process when the gateway or Redis is unavailable
+  (`HELIX_A2A_MODE=inprocess` skips the gateway entirely).
+- The Coordinator records a TASK_REQUEST and a TASK_RESULT (or ERROR)
+  message per task, with the transport used, and the API persists them as
+  `AgentMessage` rows. Gateway logs are not the record; the database is.
+- Agent Registry UI is `apps/web/app/(app)/agents/`.
+- Known limit: pub/sub fans out, so two runtime replicas hosting the same
+  agent type would both run a task (first reply wins). See
+  [ADR-008](../decisions/ADR-008-context-engine-and-a2a.md).

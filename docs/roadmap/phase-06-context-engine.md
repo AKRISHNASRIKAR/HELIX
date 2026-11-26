@@ -1,6 +1,6 @@
 # Phase 6: Context Engine
 
-**Status:** 🔜 Next up
+**Status:** ✅ Complete
 **Depends on:** [Phase 5](./phase-05-coordinator-agent.md) — context
 assembly only matters once there's a real Coordinator/agent flow consuming
 it; building it against a manual harness would risk designing it wrong.
@@ -73,3 +73,32 @@ and assemble it — persisting exactly what was handed over.
 [Phase 7: Multiple Agents + A2A](./phase-07-multi-agent-a2a.md) — now that
 one agent gets well-scoped context, add more agents for the Coordinator to
 route context and tasks to.
+
+## Implementation notes
+
+- `services/context-engine` (port 8003) exposes `POST /context/assemble`:
+  `ContextAssembleRequest` in, `AssembledContext` out (contracts in
+  `packages/contracts-py/helix_contracts/context.py`). The pipeline lives in
+  `app/assembler.py`: data source type filter, semantic-type filter,
+  table-keyword ranking, focus, history, upstream, token budget. Every step
+  records a `ContextDecision` (rule, kept, dropped, reason).
+- Requirements are a new `ContextRequirements` contract (a `BaseAgent`
+  class attribute), not `AgentCapability.inputSchema`. Each agent declares
+  its own; agent-runtime's `GET /agents` returns them.
+- Focus carries the anomaly days, metric keys and direction a task should
+  explain. It only keeps days in the question's direction (taken from the
+  question wording, the trigger, or the most severe upstream evidence) and
+  only HIGH/CRITICAL ones unless none exist.
+- History comes from the API's internal endpoint
+  `GET /api/v1/internal/organizations/:orgId/context`, so it is scoped to the
+  organization by construction. It is best effort: on failure the context
+  has empty history and a decision saying so.
+- Budget: `tokenCount = ceil(len(json) / 4)`. Over the limit, history is
+  dropped oldest first (findings, anomalies, metrics), then upstream
+  `data.dimensions` details, and `truncated` is set.
+- Snapshot ownership: the Coordinator records a `RunContextSnapshot` per
+  task (including the synthesis step) and the API writes the
+  `ContextSnapshot` rows in the same transaction as the rest of the run
+  result. See [ADR-008](../decisions/ADR-008-context-engine-and-a2a.md).
+- If the context engine is unreachable, the Coordinator hand-assembles a
+  context (`source: "fallback"`) and the run continues.

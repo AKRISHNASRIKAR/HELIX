@@ -1,6 +1,6 @@
 # Phase 9: Autonomous Investigations
 
-**Status:** Not started
+**Status:** ✅ Complete
 **Depends on:** [Phase 8](./phase-08-mcp.md) — and, more importantly, on
 every prior phase's user-triggered path being demonstrably reliable.
 Autonomy is deliberately the second-to-last phase: an autonomous system that
@@ -76,3 +76,33 @@ Analytics → Evidence → Root Cause → Recommendation → Alert
 [Phase 10: Explainability + Replay](./phase-10-explainability-replay.md) —
 now that both user-triggered and autonomous investigations exist and
 produce real reasoning chains, surface that reasoning to users.
+
+## Implementation notes
+
+- Monitoring lives in the API (`apps/api/src/monitors/`), not the analytics
+  engine. A `Monitor` row names a data source table, time column, value
+  column, aggregation and filter. The background loop is a `setInterval`
+  every `HELIX_MONITOR_INTERVAL_MS` (default 15 minutes, 0 disables) that
+  never overlaps or throws. `POST /monitors/:id/run` and `POST /monitors/run`
+  run monitors on demand.
+- Each cycle calls the engine's `/anomalies/detect` and only considers
+  anomalies within `lookbackDays` of the series' last day (not the wall
+  clock), at or above `minSeverity`.
+- Dedupe is two layers: a unique `Investigation.dedupeKey`
+  (`monitorId:date:direction`) and a Redis `SET NX EX` lock for the cooldown.
+  `HELIX_MONITOR_MAX_PER_DAY` caps autonomous investigations per
+  organization. Schema changes are in migration
+  `20261126000000_autonomous_monitoring` (`Monitor`, `Investigation.monitorId`,
+  `triggerContext`, `dedupeKey`).
+- Autonomous investigations have no creator, so every org member is notified
+  when one opens and when it finishes. The web app has `/monitoring`
+  (monitors, suggestions, recent anomalies, autonomous investigations) and
+  `/notifications`.
+- Deviation from the plan: runs are still in-process in the API with no
+  durable queue (a deliberate choice for now). An API restart mid-run leaves
+  that investigation in a non-terminal status. See
+  [ADR-009](../decisions/ADR-009-autonomous-monitoring.md).
+- Verified: a monitor on daily revenue opens one ANOMALY_DETECTED
+  investigation for 2026-10-08 ("Investigate the 39.8% drop in Daily revenue
+  detected on Thursday 2026-10-08"), a second run is deduplicated, and the
+  investigation finds the same root cause as the user-triggered question.

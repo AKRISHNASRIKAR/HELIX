@@ -1,12 +1,30 @@
 # Evaluation Plan
 
-Partially in place as of Phase 5. The first seeded scenario
-(`tests/fixtures/orders.csv`, see `tests/fixtures/README.md`) exists, and
-ground-truth tests in `services/analytics-engine/tests/test_ground_truth.py`
-check that its injected anomalies are detected. The full end-to-end
-evaluation run (accuracy, hallucination rate, latency/cost) is still Phase 10
-work. This document records the intended approach so evaluation is designed
-alongside the features it measures, not bolted on afterward.
+In place as of Phase 10. The seeded scenario (`tests/fixtures/orders.csv` plus
+the deployments feed in `tests/fixtures/deployments.json`, see
+`tests/fixtures/README.md`) has a known answer in
+`tests/fixtures/ground_truth.json`: a web checkout deploy on 2026-10-08 broke
+web orders, and refunds spiked on 2026-10-08 and 2026-10-09. Ground-truth unit
+tests check the analytics, and `tests/evaluation/` runs the full end-to-end
+evaluation against a live local stack. This document records the approach;
+the latest numbers are in [evaluation-results.md](./evaluation-results.md).
+
+## The harness (`tests/evaluation`)
+
+`run_eval.py` signs up a throwaway user, uploads `orders.csv`, connects the
+`services/mcp-demo` deployments feed, asks every question in
+`scenarios.json`, then adds a revenue monitor and runs it twice. It scores:
+- **Accuracy:** the root cause names the right day, the web channel and (with
+  deployments connected) the `web-checkout` deploy; the expected agents
+  succeeded; the autonomous run opens one investigation for 2026-10-08 and the
+  second run is deduplicated.
+- **Hallucination:** every number in a finding or summary must be traceable to
+  computed evidence (`scoring.py`, unit tested with `python3 -m unittest`).
+- **Latency:** creation to completion per investigation.
+
+Latest run (2026-11-27, rules planner, no LLM): 24 of 24 checks passed,
+0 of 216 stated numbers untraced, about 1.2 seconds per investigation.
+LLM cost is not measured yet because the optional LLM path was not enabled.
 
 ## Planned dataset
 
@@ -42,9 +60,10 @@ exist earlier in the phase plan:
 - **Agent contract tests** — does a `BaseAgent` implementation return a valid
   `AgentTask` shape, and does it degrade to `error` instead of raising on
   tool failure (Phase 4+)?
-- **Reproducibility tests** — replaying a stored investigation's
-  `AgentMessage`/`ContextSnapshot` trail should be able to reconstruct the
-  same findings (Phase 10).
+- **Reproducibility tests** (not built yet): replaying a stored
+  investigation's `AgentMessage`/`ContextSnapshot` trail should reconstruct
+  the same findings. The trail is stored and shown in the Trace tab; an
+  automated replay check is future work.
 
 See `docs/research/methodology.md` for how these fit into the overall phase
 plan.

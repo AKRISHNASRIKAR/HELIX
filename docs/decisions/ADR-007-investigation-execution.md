@@ -1,7 +1,9 @@
 # ADR-007: How an investigation executes (Phases 4 and 5)
 
 ## Status
-Accepted
+Accepted. Extended by ADR-008 (context engine and A2A routing) and ADR-010
+(multi-agent root-cause synthesis and the optional LLM), which replace the
+single-step plan and the in-process dispatch described below.
 
 ## Context
 Phase 5 makes `POST /investigations` actually run something:
@@ -50,7 +52,7 @@ LLM would only ever replace those modules. Every number still comes from
 **Confidence is derived, not invented.**
 - Anomaly evidence: `erf(|z| / sqrt(2))` of the detector's robust z-score.
 - KPI change: `1 - p` from a Welch t-test of daily values.
-- Forecasts: `1 - backtest MAPE`.
+- Forecasts: `1 - backtest MAPE / 100` (the engine reports MAPE as a percentage).
 
 ## Consequences
 - An investigation is a single long HTTP call (120s timeout) from the API to

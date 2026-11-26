@@ -1,6 +1,6 @@
 # Phase 10: Explainability + Replay
 
-**Status:** Not started
+**Status:** ✅ Complete
 **Depends on:** [Phase 9](./phase-09-autonomous-investigations.md) — needs a
 meaningful body of real investigations (user-triggered and autonomous) to
 replay; building replay UI against Phase 5's single-agent investigations
@@ -82,3 +82,26 @@ tracked in `docs/research/future-work.md` (a formal A2A protocol, a learned
 root-cause model, cross-investigation memory, human feedback loops on past
 investigations) — pull the next piece of work from there once Phase 10 is
 solid, rather than starting new work without updating this roadmap first.
+
+## Implementation notes
+
+- `analytics/segmentation` and `analytics/correlation` back three new engine
+  endpoints: `POST /segments/compare`, `/correlation` and `/events/align`.
+- `analytics/root-cause` ranks candidates across agents' evidence with
+  `1 - (1-0.7a)(1-0.6s)(1-0.5e)(1-0.2c)` and the Coordinator calls a root
+  cause at score >= 0.75. Integration fixes: segment evidence is matched by
+  metric (order-volume breakdowns only explain revenue, orders, AOV or
+  customer anomalies), non-revert deploys are preferred as triggers, and a
+  slice share above 100% is worded as "more than the full shortfall". See
+  [ADR-010](../decisions/ADR-010-root-cause-synthesis-and-optional-llm.md).
+- `GET /investigations/:id/trace` returns the plan, tasks, A2A messages,
+  context snapshots, events, evidence, findings, recommendations and a
+  prebuilt evidence graph. The investigation page has Overview, Replay (a
+  step-through player), Evidence graph (ECharts) and Trace tabs, all built
+  from persisted rows, not a re-run.
+- Evaluation: `tests/evaluation/run_eval.py` drives the live stack through
+  the API. Results are in
+  [evaluation-results.md](../research/evaluation-results.md): 24/24 accuracy
+  checks and no untraced numbers.
+- Not done, as planned: no editing or annotating past investigations, and no
+  cross-investigation trend view.
