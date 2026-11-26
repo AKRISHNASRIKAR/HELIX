@@ -373,3 +373,87 @@ def plan_analysis(
         "has a datetime column together with a usable metric column, so no time series "
         "could be analyzed."
     )
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared with the domain agents (Finance, Customer, Product)
+# ---------------------------------------------------------------------------
+
+
+def find_table(
+    data_sources: list[DataSourceContext], data_source_id: str, table_name: str
+) -> TableSchema | None:
+    """The TableSchema a DatasetChoice points at (None if it is not in the context)."""
+    for source in data_sources:
+        if str(source.id) != str(data_source_id):
+            continue
+        for table in source.schemas:
+            if table.table_name == table_name:
+                return table
+    return None
+
+
+def is_status_column(col: ColumnSchema) -> bool:
+    """Outcome columns (status/state) are not segments: slicing revenue by
+    `status = completed` restates the metric instead of locating the move."""
+    return col.name.lower() in _STATUS_NAMES or _name_has(col, ("status",))
+
+
+def _is_categorical(col: ColumnSchema) -> bool:
+    semantic = _semantic(col)
+    if semantic is not None:
+        return semantic == "categorical"
+    lowered = col.name.lower()
+    if lowered == "id" or lowered.endswith("_id"):
+        return False
+    return _type_has(col, ("str", "object", "category", "text", "varchar", "char"))
+
+
+def pick_segment_dimensions(
+    table: TableSchema,
+    *,
+    exclude: Iterable[str] = (),
+    name_pattern: str | None = None,
+    exclude_pattern: str | None = None,
+) -> list[str]:
+    """Categorical columns worth slicing a metric by, in schema order.
+
+    Skips identifiers, datetime/numeric columns, status-like outcome columns and
+    anything in `exclude`. `name_pattern` (regex, case-insensitive) keeps only
+    matching names; `exclude_pattern` drops matching names. The engine still
+    applies its own 2..20 distinct values rule.
+    """
+    excluded = {name.lower() for name in exclude}
+    dimensions: list[str] = []
+    for col in table.columns:
+        lowered = col.name.lower()
+        if lowered in excluded or not _is_categorical(col) or is_status_column(col):
+            continue
+        if name_pattern and not re.search(name_pattern, lowered, re.IGNORECASE):
+            continue
+        if exclude_pattern and re.search(exclude_pattern, lowered, re.IGNORECASE):
+            continue
+        dimensions.append(col.name)
+    return dimensions
+
+
+def non_refund_filter(table: TableSchema) -> dict[str, Any] | None:
+    """FilterSpec keeping only non-refunded rows (None when the table has no
+    refund marker). The engine's FilterSpec has no `not in`, so a status column
+    is filtered with `neq "refunded"` (the value used by orders-like tables)."""
+    refund = pick_refund_filter(table)
+    if refund is None:
+        return None
+    if refund["op"] == "eq":
+        return {"column": refund["column"], "op": "eq", "value": False}
+    return {"column": refund["column"], "op": "neq", "value": REFUND_STATUS_VALUES[0]}
+
+
+def plan_for_metric(key: str, data_sources: list[DataSourceContext]) -> AnalysisPlan | None:
+    """The AnalysisPlan for metric `key` (an INTENTS key) or None when no table can
+    serve exactly that metric (plan_analysis' revenue/orders fallback is rejected)."""
+    try:
+        plan = plan_analysis(INTENTS[key].label, data_sources)
+    except NoUsableDatasetError:
+        return None
+    return plan if plan.intent.key == key else None

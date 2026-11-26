@@ -1,21 +1,25 @@
-"""The Analytics Agent (Phase 4): the first concrete BaseAgent.
+"""The Analytics Agent (Phase 4, extended in Phase 7): the first concrete BaseAgent.
 
 execute() = plan (planner.py) -> call analytics-engine tools -> wrap the
-engine's structured output as Metric/Anomaly records, Evidence, and Findings.
-The agent never computes a statistic itself (ADR-005); it selects, links, and
-formats what the engine returned. Confidence is derived from the engine's own
-statistics (see formatting.confidence_from_*).
+engine's structured output as Metric/Anomaly records, Evidence, and Findings
+(records.py). The agent never computes a statistic itself (ADR-005); it
+selects, links, and formats what the engine returned. Confidence is derived
+from the engine's own statistics (see formatting.confidence_from_*).
+
+Phase 7 adds a segment step: the top-ranked HIGH/CRITICAL anomaly is broken
+down with /segments/compare, and a `segment` evidence + DIAGNOSTIC finding is
+recorded when the engine names a slice that explains the move.
 
 task.result is shaped so the Coordinator can drop its lists straight into an
 InvestigationRunResult (helix_contracts.investigation_run):
-    { evidence, findings, metrics, anomalies, toolCalls, analysisPlan, warnings, anomalyCount }
+    { evidence, findings, metrics, anomalies, toolCalls, analysisPlan, plan, warnings,
+      anomalyCount }
+(`plan` is the same dict as `analysisPlan`, incl. `reasoning`.)
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -26,29 +30,41 @@ from helix_contracts import (
     AgentType,
     AnalyticsType,
     BaseAgent,
+    ContextRequirements,
     DataSourceContext,
     EvidenceSourceType,
-    RunAnomaly,
     RunEvidence,
     RunFinding,
     RunMetric,
 )
-from pydantic import ValidationError
 
 from . import __version__
 from .engine_client import AnalyticsEngineClient, AnalyticsEngineError, ToolCallLog
 from .formatting import (
-    capitalize,
-    confidence_from_deviation,
     confidence_from_mape,
-    confidence_from_p_value,
+    confidence_from_segment,
     format_date,
-    format_day,
-    format_percent_change,
     format_value,
     parse_timestamp,
 )
-from .planner import AnalysisPlan, NoUsableDatasetError, plan_analysis
+from .planner import (
+    AnalysisPlan,
+    NoUsableDatasetError,
+    find_table,
+    pick_segment_dimensions,
+    plan_analysis,
+)
+from .records import (
+    Outputs,
+    Recorder,
+    anomaly_direction,
+    best_slice,
+    now,
+    rank_anomalies,
+    segment_data,
+    segment_statement,
+)
+from .task_context import TaskContext, parse_task_context
 
 logger = logging.getLogger(__name__)
 
@@ -71,44 +87,21 @@ CAPABILITIES = [
     ),
 ]
 
-
-def _now() -> datetime:
-    return datetime.now(UTC)
-
-
-@dataclass
-class _Outputs:
-    """Accumulates result records; dumped into task.result at the end."""
-
-    evidence: list[RunEvidence] = field(default_factory=list)
-    findings: list[RunFinding] = field(default_factory=list)
-    metrics: list[RunMetric] = field(default_factory=list)
-    anomalies: list[RunAnomaly] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-    anomaly_count: int = 0
-
-    def dump(self) -> dict[str, Any]:
-        def items(models):
-            return [m.model_dump(mode="json", by_alias=True) for m in models]
-
-        return {
-            "evidence": items(self.evidence),
-            "findings": items(self.findings),
-            "metrics": items(self.metrics),
-            "anomalies": items(self.anomalies),
-            "warnings": self.warnings,
-            "anomalyCount": self.anomaly_count,
-        }
+_now = now
 
 
 class AnalyticsAgent(BaseAgent):
     agent_type = AgentType.ANALYTICS
     name = "Analytics Agent"
     description = (
-        "Turns a question into analytics-engine calls (KPIs, anomaly detection, forecasting) "
-        "and returns evidence-backed findings."
+        "Turns a question into analytics-engine calls (KPIs, anomaly detection, segment "
+        "breakdown, forecasting) and returns evidence-backed findings."
     )
     version = __version__
+    context_requirements = ContextRequirements(
+        semanticTypes=["datetime", "currency", "numeric", "categorical", "identifier"],
+        includeUpstream=False,
+    )
 
     def __init__(
         self,
@@ -139,18 +132,21 @@ class AnalyticsAgent(BaseAgent):
         log = ToolCallLog()
         plan: AnalysisPlan | None = None
         try:
-            plan = self._plan(task)
-            outputs = await self._run(task, plan, log)
+            ctx = parse_task_context(task)
+            plan = plan_analysis(ctx.question, ctx.data_sources, objective=task.objective)
+            outputs = await self._run(task, ctx, plan, log)
         except (AnalyticsEngineError, NoUsableDatasetError) as exc:
             return self._fail(task, str(exc), log, plan)
         except Exception as exc:  # the BaseAgent boundary must never raise
             logger.exception("Analytics Agent failed unexpectedly on task %s", task.id)
             return self._fail(task, f"Unexpected Analytics Agent error: {exc}", log, plan)
 
+        summary = plan.summary()
         task.result = {
             **outputs.dump(),
             "toolCalls": log.to_list(),
-            "analysisPlan": plan.summary(),
+            "analysisPlan": summary,
+            "plan": summary,
         }
         task.status = AgentTaskStatus.SUCCEEDED
         task.completed_at = _now()
@@ -161,40 +157,24 @@ class AnalyticsAgent(BaseAgent):
     ) -> AgentTask:
         task.status = AgentTaskStatus.FAILED
         task.error = error
-        task.result = {
-            "toolCalls": log.to_list(),
-            "analysisPlan": plan.summary() if plan else None,
-        }
+        summary = plan.summary() if plan else None
+        task.result = {"toolCalls": log.to_list(), "analysisPlan": summary, "plan": summary}
         task.completed_at = _now()
         return task
 
     # ------------------------------------------------------------------
-    # Planning + tool calls
+    # Tool calls
     # ------------------------------------------------------------------
 
-    def _plan(self, task: AgentTask) -> AnalysisPlan:
-        ctx = task.input_context or {}
-        question = str(ctx.get("question") or task.objective)
-        try:
-            sources = [DataSourceContext.model_validate(s) for s in ctx.get("dataSources") or []]
-        except ValidationError as exc:
-            raise NoUsableDatasetError(
-                f"inputContext.dataSources is malformed: {exc.error_count()} validation error(s)."
-            ) from exc
-        if not ctx.get("organizationId"):
-            raise NoUsableDatasetError(
-                "inputContext.organizationId is required to fetch data for analysis."
-            )
-        return plan_analysis(question, sources, objective=task.objective)
-
-    async def _run(self, task: AgentTask, plan: AnalysisPlan, log: ToolCallLog) -> _Outputs:
-        ctx = task.input_context
+    async def _run(
+        self, task: AgentTask, ctx: TaskContext, plan: AnalysisPlan, log: ToolCallLog
+    ) -> Outputs:
         dataset = {
             "dataSourceId": plan.dataset.data_source_id,
-            "organizationId": str(ctx["organizationId"]),
+            "organizationId": ctx.organization_id,
             "table": plan.dataset.table,
         }
-        out = _Outputs()
+        rec = Recorder(task.id, AgentType.ANALYTICS)
 
         kpi_response = await self.engine.kpis(
             {
@@ -214,7 +194,11 @@ class AnalyticsAgent(BaseAgent):
             },
             log,
         )
-        forecast_response = None
+        self._add_kpis(rec, plan, kpi_response)
+        top = self._add_anomalies(rec, plan, anomaly_response)
+        if top is not None:
+            await self._add_segment(rec, plan, ctx.data_sources, dataset, top, log)
+
         if plan.forecast:
             try:
                 forecast_response = await self.engine.forecast(
@@ -223,13 +207,10 @@ class AnalyticsAgent(BaseAgent):
                 )
             except AnalyticsEngineError as exc:
                 # A forecast is a nice-to-have; KPIs and anomalies still stand.
-                out.warnings.append(f"Forecast skipped: {exc}")
-
-        self._add_kpis(task.id, plan, kpi_response, out)
-        self._add_anomalies(task.id, plan, anomaly_response, out)
-        if forecast_response is not None:
-            self._add_forecast(task.id, plan, forecast_response, out)
-        return out
+                rec.out.warnings.append(f"Forecast skipped: {exc}")
+            else:
+                self._add_forecast(rec, plan, forecast_response)
+        return rec.out
 
     # ------------------------------------------------------------------
     # Engine output -> records, evidence, findings
@@ -242,225 +223,147 @@ class AnalyticsAgent(BaseAgent):
             "description": description,
         }
 
-    def _metric(
-        self, plan: AnalysisPlan, raw: dict[str, Any], *, name: str, unit: str | None
-    ) -> RunMetric:
-        series = [
-            {"timestamp": parse_timestamp(p["timestamp"]), "value": p["value"]}
-            for p in raw.get("series") or []
-            if p.get("value") is not None
-        ]
-        return RunMetric(
-            id=uuid4(),
-            dataSourceId=plan.dataset.data_source_id,
-            name=name,
-            unit=raw.get("unit") or unit,
-            value=raw["value"],
-            baseline=raw.get("baseline"),
-            changePercent=raw.get("changePercent"),
-            series=series or None,
-            computationMethod=raw.get("computationMethod") or "analytics-engine",
-            computedAt=parse_timestamp(raw["computedAt"]) if raw.get("computedAt") else _now(),
-        )
-
     def _add_kpis(
-        self, task_id: UUID, plan: AnalysisPlan, response: dict[str, Any], out: _Outputs
+        self, rec: Recorder, plan: AnalysisPlan, response: dict[str, Any]
     ) -> None:
         intent = plan.intent
         for raw in response.get("metrics") or []:
-            metric = self._metric(plan, raw, name=raw.get("name") or intent.key, unit=intent.unit)
-            out.metrics.append(metric)
-            unit = metric.unit
-            window = raw.get("window") or {}
-            days = self.kpi_window_days
-            end = format_date(window["currentEnd"]) if window.get("currentEnd") else None
-            value_text = format_value(metric.value, unit)
-            baseline_text = format_value(metric.baseline, unit)
-            period = f"the {days} days ending {end}" if end else f"the last {days} days"
-            p_value = raw.get("pValue")
-            confidence = confidence_from_p_value(p_value)
-
-            if metric.change_percent is None or metric.baseline is None:
-                statement = (
-                    f"Over {period}, {intent.label} came to {value_text}; "
-                    "there is no comparable previous window."
-                )
-            else:
-                direction = (
-                    "up" if metric.change_percent > 0
-                    else "down" if metric.change_percent < 0 else "flat"
-                )
-                change = (
-                    f"{direction} {format_percent_change(metric.change_percent)}"
-                    if direction != "flat" else "unchanged"
-                )
-                significance = (
-                    f" (Welch t-test p = {p_value:.3g})" if p_value is not None
-                    else " (significance not computable)"
-                )
-                statement = (
-                    f"Over {period}, {intent.label} came to {value_text}, {change} "
-                    f"from {baseline_text} in the previous {days} days{significance}."
-                )
-
-            evidence = RunEvidence(
-                id=uuid4(),
-                agentTaskId=task_id,
-                sourceType=EvidenceSourceType.METRIC,
-                source=self._source(
-                    task_id, plan,
-                    f"{capitalize(intent.label)} KPI from table '{plan.dataset.table}' "
-                    "(analytics-engine /kpis)",
-                ),
-                summary=statement,
-                data={
-                    "kind": "kpi",
-                    "metricId": str(metric.id),
-                    "metricKey": intent.key,
-                    "metricName": intent.label,
-                    "unit": unit,
-                    "value": metric.value,
-                    "baseline": metric.baseline,
-                    "changePercent": metric.change_percent,
-                    "pValue": p_value,
-                    "window": window,
-                    "computationMethod": metric.computation_method,
-                    "formatted": {
-                        "value": value_text,
-                        "baseline": baseline_text,
-                        "changePercent": (
-                            format_percent_change(metric.change_percent)
-                            if metric.change_percent is not None else None
-                        ),
-                        "period": period,
-                    },
-                },
-                confidence=confidence,
-                collectedAt=_now(),
+            rec.kpi(
+                data_source_id=plan.dataset.data_source_id,
+                table=plan.dataset.table,
+                raw=raw,
+                metric_key=intent.key,
+                label=intent.label,
+                unit=intent.unit,
+                window_days=self.kpi_window_days,
             )
-            out.evidence.append(evidence)
-            out.findings.append(
-                RunFinding(
-                    id=uuid4(),
-                    agentTaskId=task_id,
-                    agentType=AgentType.ANALYTICS,
-                    analyticsType=AnalyticsType.DESCRIPTIVE,
-                    statement=statement,
-                    confidence=confidence,
-                    evidenceIds=[evidence.id],
-                )
-            )
-
-    def _rank_anomalies(
-        self, plan: AnalysisPlan, anomalies: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
-        """Top N by |deviationScore|, anomalies matching the question's direction first."""
-
-        def key(anomaly: dict[str, Any]):
-            mismatch = (
-                plan.direction_hint is not None and anomaly.get("direction") != plan.direction_hint
-            )
-            return (mismatch, -abs(anomaly.get("deviationScore") or 0.0))
-
-        return sorted(anomalies, key=key)[: self.max_anomalies]
 
     def _add_anomalies(
-        self, task_id: UUID, plan: AnalysisPlan, response: dict[str, Any], out: _Outputs
-    ) -> None:
+        self, rec: Recorder, plan: AnalysisPlan, response: dict[str, Any]
+    ) -> tuple[dict[str, Any], RunEvidence] | None:
+        """Records the top N anomalies; returns (raw, evidence) of the top-ranked one."""
+        out = rec.out
         intent = plan.intent
         label = intent.series_label or intent.label
         unit = intent.series_unit if intent.series_label else intent.unit
         raw_metric = response.get("metric")
         if not raw_metric:
             out.warnings.append("Anomaly detection returned no metric series.")
-            return
-        series_metric = self._metric(plan, raw_metric, name=f"{label} (daily)", unit=unit)
+            return None
+        series_metric = rec.metric(
+            plan.dataset.data_source_id, raw_metric, name=f"{label} (daily)", unit=unit
+        )
         out.metrics.append(series_metric)
 
         detected = response.get("anomalies") or []
         out.anomaly_count = len(detected)
         method_used = response.get("methodUsed") or "auto"
-        for raw in self._rank_anomalies(plan, detected):
-            score = raw.get("deviationScore")
-            direction = raw.get("direction") or ("drop" if (score or 0) < 0 else "spike")
-            severity = raw.get("severity") or "MEDIUM"
-            when = parse_timestamp(raw["timestamp"])
-            value_text = format_value(raw.get("value"), unit)
-            expected_text = format_value(raw.get("expectedValue"), unit)
-            detection = raw.get("detectionMethod") or method_used
-            anomaly = RunAnomaly(
-                id=uuid4(),
-                metricId=series_metric.id,
-                dataSourceId=plan.dataset.data_source_id,
-                description=raw.get("description")
-                or f"{capitalize(label)} {direction} on {format_date(when)}",
-                severity=severity,
-                detectedAt=when,
-                detectionMethod=detection,
-                value=raw["value"],
-                expectedValue=raw.get("expectedValue"),
-                deviationScore=score,
+        top: tuple[dict[str, Any], RunEvidence] | None = None
+        for raw in rank_anomalies(detected, plan.direction_hint, self.max_anomalies):
+            evidence, _ = rec.anomaly(
+                data_source_id=plan.dataset.data_source_id,
+                table=plan.dataset.table,
+                raw=raw,
+                series_metric=series_metric,
+                metric_key=intent.key,
+                label=label,
+                unit=unit,
+                method_used=method_used,
             )
-            out.anomalies.append(anomaly)
+            top = top or (raw, evidence)
+        return top
 
-            verb = "dropped" if direction == "drop" else "spiked"
-            score_text = f"deviation score {score:+.1f}, " if score is not None else ""
-            statement = (
-                f"{capitalize(label)} {verb} on {format_day(when)}: {value_text} against "
-                f"an expected {expected_text} ({score_text}{severity} severity, "
-                f"detected by {detection})."
+    async def _add_segment(
+        self,
+        rec: Recorder,
+        plan: AnalysisPlan,
+        sources: list[DataSourceContext],
+        dataset: dict[str, Any],
+        top: tuple[dict[str, Any], RunEvidence],
+        log: ToolCallLog,
+    ) -> None:
+        """Segment step (Phase 7): where did the top HIGH/CRITICAL anomaly happen?
+
+        Calls /segments/compare for the anomaly day with the same series spec and,
+        only when the engine returns a topSlice, records `segment` evidence plus a
+        DIAGNOSTIC finding. Confidence = anomaly confidence * concentration of the
+        best dimension (formatting.confidence_from_segment). A failed call or a null
+        topSlice records nothing but a warning / reasoning line (no fake claims).
+        """
+        raw, anomaly_evidence = top
+        severity = str(raw.get("severity") or "").upper()
+        if severity not in ("HIGH", "CRITICAL"):
+            plan.reasoning.append(
+                f"Top anomaly is {severity or 'unrated'} severity, so no segment breakdown was run."
             )
-            confidence = confidence_from_deviation(score)
-            evidence = RunEvidence(
-                id=uuid4(),
-                agentTaskId=task_id,
-                sourceType=EvidenceSourceType.ANOMALY,
-                source=self._source(
-                    task_id, plan,
-                    f"Anomaly in daily {label} from table '{plan.dataset.table}' "
-                    "(analytics-engine /anomalies/detect)",
-                ),
-                summary=anomaly.description,
-                data={
-                    "kind": "anomaly",
-                    "anomalyId": str(anomaly.id),
-                    "metricId": str(series_metric.id),
-                    "metricKey": intent.key,
-                    "metricName": label,
-                    "unit": unit,
-                    "timestamp": when.isoformat(),
-                    "date": format_date(when),
-                    "direction": direction,
-                    "severity": severity,
-                    "value": anomaly.value,
-                    "expectedValue": anomaly.expected_value,
-                    "deviationScore": score,
-                    "detectionMethod": detection,
-                    "formatted": {
-                        "value": value_text,
-                        "expectedValue": expected_text,
-                        "day": format_day(when),
-                    },
-                },
-                confidence=confidence,
-                collectedAt=_now(),
+            return
+        table = find_table(sources, plan.dataset.data_source_id, plan.dataset.table)
+        exclude = [plan.dataset.time_column, plan.dataset.value_column or ""]
+        if plan.dataset.filter:
+            exclude.append(plan.dataset.filter["column"])
+        dimensions = pick_segment_dimensions(table, exclude=exclude) if table else []
+        if not dimensions:
+            plan.reasoning.append(
+                f"Table '{plan.dataset.table}' has no categorical columns to segment by."
             )
-            out.evidence.append(evidence)
-            out.findings.append(
-                RunFinding(
-                    id=uuid4(),
-                    agentTaskId=task_id,
-                    agentType=AgentType.ANALYTICS,
-                    analyticsType=AnalyticsType.DIAGNOSTIC,
-                    statement=statement,
-                    confidence=confidence,
-                    evidenceIds=[evidence.id],
-                )
+            return
+        intent = plan.intent
+        label = intent.series_label or intent.label
+        unit = intent.series_unit if intent.series_label else intent.unit
+        date = format_date(raw["timestamp"])
+        body: dict[str, Any] = {
+            "dataset": dataset,
+            **plan.series_spec,
+            "dimensions": dimensions,
+            "targetDate": date,
+            "baseline": "same_weekday",
+            "baselinePeriods": 4,
+            "metricName": label,
+        }
+        if unit:
+            body["unit"] = unit
+        try:
+            response = await self.engine.compare_segments(body, log)
+        except AnalyticsEngineError as exc:
+            rec.out.warnings.append(f"Segment comparison skipped: {exc}")
+            return
+        top_slice, source = best_slice(response)
+        if top_slice is None:
+            plan.reasoning.append(
+                f"Segment comparison for {date} found no single slice that explains the move."
             )
+            return
+        direction = anomaly_direction(raw)
+        data = segment_data(
+            response, kind="segment", metric_key=intent.key, metric_name=label, unit=unit,
+            date=date, direction=direction, top_slice=top_slice, top_slice_source=source,
+        )
+        data["metricId"] = anomaly_evidence.data.get("metricId")
+        data["anomalyEvidenceId"] = str(anomaly_evidence.id)
+        statement = segment_statement(
+            metric_label=label, date=date, direction=direction, top=top_slice, unit=unit
+        )
+        confidence = confidence_from_segment(anomaly_evidence.confidence, data["concentration"])
+        evidence = rec.add_evidence(
+            source_type=EvidenceSourceType.METRIC,
+            data_source_id=plan.dataset.data_source_id,
+            description=f"Segment breakdown of daily {label} on {date} from table "
+            f"'{plan.dataset.table}' (analytics-engine /segments/compare)",
+            summary=statement,
+            data=data,
+            confidence=confidence,
+        )
+        rec.add_finding(
+            analytics_type=AnalyticsType.DIAGNOSTIC,
+            statement=statement,
+            confidence=confidence,
+            evidence=[evidence],
+        )
 
     def _add_forecast(
-        self, task_id: UUID, plan: AnalysisPlan, response: dict[str, Any], out: _Outputs
+        self, rec: Recorder, plan: AnalysisPlan, response: dict[str, Any]
     ) -> None:
+        task_id, out = rec.task_id, rec.out
         points = [p for p in response.get("forecast") or [] if p.get("value") is not None]
         if not points:
             out.warnings.append("Forecast returned no points.")

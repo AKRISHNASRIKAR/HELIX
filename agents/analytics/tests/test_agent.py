@@ -66,7 +66,8 @@ async def test_happy_path_produces_linked_evidence_and_findings(engine):
     assert done.status == AgentTaskStatus.SUCCEEDED
     assert done.error is None
     assert done.started_at and done.completed_at
-    assert engine.paths() == ["/kpis", "/anomalies/detect"]
+    # The top anomaly is CRITICAL, so the Phase 7 segment step runs too.
+    assert engine.paths() == ["/kpis", "/anomalies/detect", "/segments/compare"]
     kpi_body = engine.requests[0][1]
     assert kpi_body["dataset"] == {"dataSourceId": ds_id, "organizationId": org_id,
                                    "table": "orders"}
@@ -78,8 +79,8 @@ async def test_happy_path_produces_linked_evidence_and_findings(engine):
     metrics = {m["id"]: m for m in result["metrics"]}
     anomalies = {a["id"]: a for a in result["anomalies"]}
 
-    # 1 KPI + top 3 anomalies.
-    assert len(result["findings"]) == 4
+    # 1 KPI + top 3 anomalies + 1 segment breakdown.
+    assert len(result["findings"]) == 5
     assert len(anomalies) == 3
     assert result["anomalyCount"] == 4
     for finding in result["findings"]:
@@ -104,7 +105,10 @@ async def test_happy_path_produces_linked_evidence_and_findings(engine):
     assert diagnostic[0]["confidence"] == 0.999
     assert diagnostic[1]["confidence"] == pytest.approx(math.erf(3.1 / math.sqrt(2)), abs=1e-4)
     assert "spiked" in diagnostic[2]["statement"]
-    assert [t["endpoint"] for t in result["toolCalls"]] == ["/kpis", "/anomalies/detect"]
+    assert "concentrated in channel = web" in diagnostic[3]["statement"]
+    assert [t["endpoint"] for t in result["toolCalls"]] == [
+        "/kpis", "/anomalies/detect", "/segments/compare",
+    ]
     for item in result["metrics"]:
         UUID(item["id"])
         assert item["computationMethod"]

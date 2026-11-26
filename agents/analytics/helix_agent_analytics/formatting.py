@@ -85,3 +85,29 @@ def confidence_from_mape(mape: float | None) -> float:
     if mape is None:
         return 0.5
     return round(_clamp(1.0 - mape / 100.0), 4)
+
+
+def format_signed_percent(change_percent: float | None) -> str:
+    """-82.92 -> '-82.9%' (engine deltaPercent is in percentage points)."""
+    if change_percent is None:
+        return "n/a"
+    return f"{change_percent:+.1f}%"
+
+
+def format_share(share: float | None) -> str:
+    """A 0..1 (or larger) fraction as a percentage: 0.9512 -> '95.1%'."""
+    if share is None:
+        return "n/a"
+    return f"{share * 100:.1f}%"
+
+
+def join_words(words: list[str]) -> str:
+    """['a', 'b', 'c'] -> 'a, b and c'."""
+    if len(words) <= 1:
+        return "".join(words)
+    return f"{', '.join(words[:-1])} and {words[-1]}"
+
+
+def confidence_from_segment(anomaly_confidence: float, concentration: float | None) -> float:
+    """Segment finding: anomaly confidence * concentration, clipped to [0, 1]."""
+    return round(_clamp(anomaly_confidence * _clamp(concentration or 0.0)), 4)

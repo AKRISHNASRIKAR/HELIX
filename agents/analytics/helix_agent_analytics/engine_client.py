@@ -57,12 +57,20 @@ class ToolCallLog:
 
 
 def summarize_request(body: dict[str, Any]) -> dict[str, Any]:
-    """The request minus any inline rows, so tool-call logs stay small."""
-    summary = {key: value for key, value in body.items() if key != "dataset"}
-    dataset = body.get("dataset") or {}
-    summary["dataset"] = {key: value for key, value in dataset.items() if key != "rows"}
-    if "rows" in dataset:
-        summary["dataset"]["rowCount"] = len(dataset["rows"])
+    """The request minus any inline rows, so tool-call logs stay small.
+
+    Nested series specs (`/correlation` a/b, `/events/align` events) are
+    summarized the same way."""
+    summary: dict[str, Any] = {}
+    for key, value in body.items():
+        if key == "dataset" and isinstance(value, dict):
+            summary[key] = {k: v for k, v in value.items() if k != "rows"}
+            if "rows" in value:
+                summary[key]["rowCount"] = len(value["rows"])
+        elif isinstance(value, dict) and isinstance(value.get("dataset"), dict):
+            summary[key] = summarize_request(value)
+        else:
+            summary[key] = value
     return summary
 
 
@@ -161,3 +169,21 @@ class AnalyticsEngineClient:
         self, body: dict[str, Any], log: ToolCallLog | None = None
     ) -> dict[str, Any]:
         return await self.post("/forecast", body, log)
+
+    async def compare_segments(
+        self, body: dict[str, Any], log: ToolCallLog | None = None
+    ) -> dict[str, Any]:
+        """POST /segments/compare: which slice of a dimension explains a day's move."""
+        return await self.post("/segments/compare", body, log)
+
+    async def correlate(
+        self, body: dict[str, Any], log: ToolCallLog | None = None
+    ) -> dict[str, Any]:
+        """POST /correlation: lagged correlation between two daily series."""
+        return await self.post("/correlation", body, log)
+
+    async def align_events(
+        self, body: dict[str, Any], log: ToolCallLog | None = None
+    ) -> dict[str, Any]:
+        """POST /events/align: events (deploys, releases) near target days."""
+        return await self.post("/events/align", body, log)
