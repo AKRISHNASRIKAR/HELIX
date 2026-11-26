@@ -125,7 +125,7 @@ function runResult() {
   };
 }
 
-function setup(opts: { status?: string } = {}) {
+function setup(opts: { status?: string; inv?: Record<string, unknown> } = {}) {
   const tx = {
     investigation: {
       findUniqueOrThrow: jest
@@ -143,10 +143,12 @@ function setup(opts: { status?: string } = {}) {
     findingEvidence: { createMany: jest.fn() },
     recommendation: { createMany: jest.fn() },
     recommendationFinding: { createMany: jest.fn() },
+    agentMessage: { createMany: jest.fn() },
+    contextSnapshot: { createMany: jest.fn() },
   };
   const prisma = {
     investigation: {
-      findUnique: jest.fn().mockResolvedValue(inv),
+      findUnique: jest.fn().mockResolvedValue(opts.inv ?? inv),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     dataSource: {
@@ -165,7 +167,7 @@ function setup(opts: { status?: string } = {}) {
     $transaction: jest.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
   };
   const agentRuntime = { runInvestigation: jest.fn(), listAgents: jest.fn() };
-  const notifications = { create: jest.fn() };
+  const notifications = { create: jest.fn(), notifyOrganization: jest.fn() };
   const runner = new InvestigationRunnerService(
     prisma as unknown as PrismaService,
     agentRuntime as unknown as AgentRuntimeClient,
@@ -299,5 +301,132 @@ describe('InvestigationRunnerService', () => {
     agentRuntime.runInvestigation.mockResolvedValue(r);
     await runner.run(inv.id);
     expect(tx.agentTask.createMany.mock.calls[0][0].data[0].result).toBe(Prisma.DbNull);
+  });
+
+  it('persists A2A messages and context snapshots, dropping links to unknown tasks', async () => {
+    const { runner, tx, agentRuntime } = setup();
+    const r = runResult();
+    const taskId = r.tasks[0]!.id;
+    const correlationId = taskId;
+    const messages = [
+      {
+        id: randomUUID(),
+        type: 'TASK_REQUEST',
+        agentTaskId: taskId,
+        fromAgent: 'COORDINATOR',
+        toAgent: 'ANALYTICS',
+        payload: { objective: 'Analyze revenue', transport: 'a2a-gateway' },
+        correlationId,
+        createdAt: '2026-10-14T09:00:00Z',
+      },
+      {
+        id: randomUUID(),
+        type: 'TASK_RESULT',
+        agentTaskId: randomUUID(), // not a task in this run
+        fromAgent: 'ANALYTICS',
+        toAgent: 'COORDINATOR',
+        payload: { status: 'SUCCEEDED', findings: 1 },
+        correlationId,
+        createdAt: '2026-10-14T09:00:02Z',
+      },
+    ];
+    const contextSnapshots = [
+      {
+        id: randomUUID(),
+        agentTaskId: taskId,
+        agentType: 'ANALYTICS',
+        assembledContext: { source: 'context-engine', decisions: [] },
+        tokenCount: 412,
+        createdAt: '2026-10-14T09:00:00Z',
+      },
+    ];
+    agentRuntime.runInvestigation.mockResolvedValue({
+      ...r,
+      messages,
+      contextSnapshots,
+      meta: { planner: 'rules', llmCalls: 0 },
+    });
+    await runner.run(inv.id);
+
+    const rows = tx.agentMessage.createMany.mock.calls[0][0].data;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      id: messages[0]!.id,
+      investigationId: inv.id,
+      agentTaskId: taskId,
+      type: 'TASK_REQUEST',
+      fromAgent: 'COORDINATOR',
+      toAgent: 'ANALYTICS',
+      correlationId,
+      payload: messages[0]!.payload,
+    });
+    expect(rows[0].createdAt).toEqual(new Date('2026-10-14T09:00:00Z'));
+    expect(rows[1].agentTaskId).toBeNull();
+    expect(tx.contextSnapshot.createMany.mock.calls[0][0].data).toEqual([
+      expect.objectContaining({
+        id: contextSnapshots[0]!.id,
+        investigationId: inv.id,
+        agentTaskId: taskId,
+        agentType: 'ANALYTICS',
+        tokenCount: 412,
+        assembledContext: contextSnapshots[0]!.assembledContext,
+      }),
+    ]);
+  });
+
+  it('stores meta in the completed event and accepts a Phase 5 result without the new fields', async () => {
+    const { runner, prisma, tx, agentRuntime } = setup();
+    agentRuntime.runInvestigation.mockResolvedValue({ ...runResult(), meta: { planner: 'llm' } });
+    await runner.run(inv.id);
+    const completed = prisma.investigationEvent.create.mock.calls[0][0].data;
+    expect(completed.payload.meta).toEqual({ planner: 'llm' });
+
+    const second = setup();
+    second.agentRuntime.runInvestigation.mockResolvedValue(runResult());
+    await second.runner.run(inv.id);
+    expect(second.tx.agentMessage.createMany.mock.calls[0][0].data).toEqual([]);
+    expect(second.prisma.investigationEvent.create.mock.calls[0][0].data.payload.meta).toEqual({});
+    expect(tx.investigation.update).toHaveBeenCalled();
+  });
+
+  it('accepts COORDINATOR findings and sends triggerContext to the runtime', async () => {
+    const trigger = { monitorId: randomUUID(), date: '2026-10-08', direction: 'drop' };
+    const { runner, tx, agentRuntime } = setup({
+      inv: { ...inv, triggerType: 'ANOMALY_DETECTED', triggerContext: trigger },
+    });
+    const r = runResult();
+    r.findings[0]!.agentType = 'COORDINATOR';
+    agentRuntime.runInvestigation.mockResolvedValue(r);
+    await runner.run(inv.id);
+    expect(agentRuntime.runInvestigation.mock.calls[0][0].investigation).toMatchObject({
+      triggerType: 'ANOMALY_DETECTED',
+      triggerContext: trigger,
+    });
+    expect(tx.finding.createMany.mock.calls[0][0].data[0].agentType).toBe('COORDINATOR');
+  });
+
+  it('notifies every org member when an investigation has no creator', async () => {
+    const { runner, agentRuntime, notifications } = setup({
+      inv: { ...inv, createdByUserId: null, triggerType: 'ANOMALY_DETECTED' },
+    });
+    agentRuntime.runInvestigation.mockResolvedValue(runResult());
+    await runner.run(inv.id);
+    expect(notifications.create).not.toHaveBeenCalled();
+    expect(notifications.notifyOrganization).toHaveBeenCalledWith(
+      ORG,
+      expect.objectContaining({
+        type: 'investigation.autonomous_completed',
+        title: 'Autonomous investigation completed',
+        link: `/investigations/${inv.id}`,
+      }),
+    );
+
+    const down = setup({ inv: { ...inv, createdByUserId: null } });
+    down.agentRuntime.runInvestigation.mockRejectedValue(new UpstreamError('down', null));
+    await down.runner.run(inv.id);
+    expect(down.notifications.notifyOrganization).toHaveBeenCalledWith(
+      ORG,
+      expect.objectContaining({ type: 'investigation.autonomous_failed' }),
+    );
   });
 });

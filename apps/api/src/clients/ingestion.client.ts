@@ -5,7 +5,7 @@ import { requestJson } from './http';
 
 /** Spec B ConnectionSpec: everything the ingestion service needs to reach a source. */
 export interface ConnectionSpec {
-  type: 'POSTGRESQL' | 'CSV';
+  type: 'POSTGRESQL' | 'CSV' | 'MCP' | 'GITHUB';
   config: Record<string, unknown>;
   credentials?: Record<string, unknown> | null;
   filePath?: string | null;

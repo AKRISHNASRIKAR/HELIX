@@ -31,6 +31,12 @@ export class NotificationsController {
     return this.notifications.list(user.id, q.unread);
   }
 
+  @Get('unread-count')
+  @ApiOperation({ summary: "Number of the current user's unread notifications (all orgs)" })
+  async unreadCount(@CurrentUser() user: AuthUser): Promise<{ count: number }> {
+    return { count: await this.notifications.unreadCount(user.id) };
+  }
+
   @Post('read-all')
   @HttpCode(204)
   @ApiOperation({ summary: 'Mark every notification as read' })

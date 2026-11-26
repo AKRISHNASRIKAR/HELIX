@@ -16,6 +16,8 @@ export interface AgentView {
   /** Mean task duration in ms; null until a task has finished. */
   avgMs: number | null;
   capabilities: { name: string; description: string }[];
+  /** As reported by agent-runtime (Phase 6), null when it does not say. */
+  contextRequirements: Record<string, unknown> | null;
 }
 
 // Shown (as UNAVAILABLE) when the agent runtime can't be reached, so the UI
@@ -23,6 +25,9 @@ export interface AgentView {
 const KNOWN_AGENTS: RuntimeAgent[] = [
   { type: AgentType.COORDINATOR, name: 'Coordinator', status: 'UNAVAILABLE', capabilities: [] },
   { type: AgentType.ANALYTICS, name: 'Analytics', status: 'UNAVAILABLE', capabilities: [] },
+  { type: AgentType.FINANCE, name: 'Finance', status: 'UNAVAILABLE', capabilities: [] },
+  { type: AgentType.CUSTOMER, name: 'Customer', status: 'UNAVAILABLE', capabilities: [] },
+  { type: AgentType.PRODUCT, name: 'Product', status: 'UNAVAILABLE', capabilities: [] },
 ];
 
 const FINISHED: AgentTaskStatus[] = [
@@ -82,6 +87,10 @@ export class AgentsService {
         successRate: s && s.finished > 0 ? s.ok / s.finished : null,
         avgMs: s && s.timed > 0 ? Math.round(s.totalMs / s.timed) : null,
         capabilities: Array.isArray(a.capabilities) ? a.capabilities : [],
+        contextRequirements:
+          a.contextRequirements && typeof a.contextRequirements === 'object'
+            ? a.contextRequirements
+            : null,
       };
     });
   }

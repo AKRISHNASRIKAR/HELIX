@@ -1,6 +1,6 @@
 import { Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { InvestigationStatus, type Investigation } from '@helix/database';
+import { InvestigationStatus, InvestigationTriggerType, type Investigation } from '@helix/database';
 import { z } from 'zod';
 import { Audit } from '../audit/audit.decorator';
 import { ApiQueries, CurrentUser, Tenant, ZodBody, ZodQuery } from '../common/decorators';
@@ -8,6 +8,7 @@ import type { AuthUser, TenantContext } from '../common/types';
 import { UuidPipe } from '../common/uuid-param.pipe';
 import { TenantScoped } from '../tenant/tenant.guard';
 import { InvestigationDetail, InvestigationsService } from './investigations.service';
+import type { InvestigationTrace } from './trace';
 
 const CreateInvestigationSchema = z.object({
   projectId: z.string().uuid(),
@@ -17,6 +18,7 @@ const UpdateInvestigationSchema = z.object({ status: z.literal(InvestigationStat
 const ListQuerySchema = z.object({
   projectId: z.string().uuid().optional(),
   status: z.nativeEnum(InvestigationStatus).optional(),
+  triggerType: z.nativeEnum(InvestigationTriggerType).optional(),
 });
 
 @ApiTags('investigations')
@@ -27,7 +29,7 @@ export class InvestigationsController {
 
   @Get()
   @ApiOperation({ summary: 'Investigations in the organization, newest first (max 200)' })
-  @ApiQueries({ name: 'projectId' }, { name: 'status' })
+  @ApiQueries({ name: 'projectId' }, { name: 'status' }, { name: 'triggerType' })
   findAll(
     @Tenant() t: TenantContext,
     @ZodQuery(ListQuerySchema) q: z.infer<typeof ListQuerySchema>,
@@ -58,6 +60,18 @@ export class InvestigationsController {
     @Param('id', UuidPipe) id: string,
   ): Promise<InvestigationDetail> {
     return this.investigations.detail(t.organizationId, id);
+  }
+
+  @Get(':id/trace')
+  @ApiOperation({
+    summary:
+      'Agent and context trace: plan, tasks, A2A messages, context snapshots, evidence graph',
+  })
+  trace(
+    @Tenant() t: TenantContext,
+    @Param('id', UuidPipe) id: string,
+  ): Promise<InvestigationTrace> {
+    return this.investigations.trace(t.organizationId, id);
   }
 
   @Patch(':id')

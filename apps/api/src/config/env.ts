@@ -29,6 +29,13 @@ export const ApiEnvSchema = BaseEnvSchema.extend({
 
   INGESTION_SERVICE_URL: z.string().url().default('http://localhost:8004'),
   AGENT_RUNTIME_URL: z.string().url().default('http://localhost:8001'),
+  ANALYTICS_ENGINE_URL: z.string().url().default('http://localhost:8002'),
+
+  // Phase 9 autonomous monitoring. 0 disables the background loop (it never
+  // runs under NODE_ENV=test or HELIX_DEMO=1 either).
+  HELIX_MONITOR_INTERVAL_MS: z.coerce.number().int().min(0).default(900_000),
+  // Cap on monitor-opened (ANOMALY_DETECTED) investigations per org per 24h.
+  HELIX_MONITOR_MAX_PER_DAY: z.coerce.number().int().min(0).default(5),
 }).superRefine((env, ctx) => {
   if (env.NODE_ENV !== 'production') return;
   if (env.JWT_SECRET === DEV_JWT_SECRET) {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  AgentMessageType,
   AgentTaskStatus,
   AgentType,
   AnalyticsType,
@@ -12,7 +13,11 @@ import {
  * Spec D InvestigationRunResult, as returned by agent-runtime
  * `POST /investigations/run`. Validated before anything is persisted so a
  * malformed response fails the investigation cleanly instead of half-writing.
- * Ids are UUIDs generated in Python and stored as-is.
+ * Ids are UUIDs generated in Python and stored as-is. Phases 6 to 9 added
+ * `messages` (A2A trail), `contextSnapshots` (what each task was given) and
+ * `meta` (planner / summary writer / LLM usage); all optional so a Phase 5
+ * runtime still validates. Evidence `data` stays free-form (see the kind
+ * catalogue in the build spec).
  */
 const Id = z.string().uuid();
 const Json = z.unknown();
@@ -139,5 +144,35 @@ export const RunResultSchema = z.object({
   summary: z.string().nullish(),
   overallConfidence: z.number().nullish(),
   rootCauseFindingId: Id.nullish(),
+  messages: z
+    .array(
+      z.object({
+        id: Id,
+        type: z.nativeEnum(AgentMessageType),
+        agentTaskId: Id.nullish(),
+        fromAgent: z.string().min(1),
+        toAgent: z.string().min(1),
+        payload: z.record(z.unknown()).default({}),
+        correlationId: z.string().min(1),
+        createdAt: Ts.nullish(),
+      }),
+    )
+    .default([]),
+  contextSnapshots: z
+    .array(
+      z.object({
+        id: Id,
+        agentTaskId: Id.nullish(),
+        agentType: z.nativeEnum(AgentType),
+        assembledContext: z.record(z.unknown()),
+        tokenCount: z.number().int().nonnegative().nullish(),
+        createdAt: Ts.nullish(),
+      }),
+    )
+    .default([]),
+  meta: z
+    .record(z.unknown())
+    .nullish()
+    .transform((v) => v ?? {}),
 });
 export type RunResult = z.infer<typeof RunResultSchema>;

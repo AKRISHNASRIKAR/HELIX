@@ -7,6 +7,7 @@ import {
 } from '@helix/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { InvestigationRunnerService } from '../runner/investigation-runner.service';
+import { buildTrace, InvestigationTrace, runMeta } from './trace';
 
 /** Statuses from which a user may still cancel. */
 export const CANCELLABLE: InvestigationStatus[] = [
@@ -24,6 +25,10 @@ const TERMINAL: InvestigationStatus[] = [
 
 /** GET /investigations/:id: the contract Investigation plus its full trail. */
 export type InvestigationDetail = Investigation & {
+  /** The monitor that opened it (ANOMALY_DETECTED), else null. */
+  monitor: { id: string; name: string } | null;
+  /** Run metadata from the agent runtime (planner, summary writer, LLM usage); {} before a run. */
+  meta: Record<string, unknown>;
   steps: {
     id: string;
     order: number;
@@ -80,7 +85,11 @@ export class InvestigationsService {
   // name, and Prisma's inferred payload type isn't one (TS2742).
   findAll(
     organizationId: string,
-    filter: { projectId?: string; status?: InvestigationStatus } = {},
+    filter: {
+      projectId?: string;
+      status?: InvestigationStatus;
+      triggerType?: InvestigationTriggerType;
+    } = {},
   ): Promise<Investigation[]> {
     return this.prisma.investigation.findMany({
       where: { organizationId, ...filter },
@@ -132,6 +141,7 @@ export class InvestigationsService {
         },
         recommendations: { orderBy: { createdAt: 'asc' } },
         events: { orderBy: { createdAt: 'asc' } },
+        monitor: { select: { id: true, name: true } },
       },
     });
     if (!inv) throw new NotFoundException('Investigation not found');
@@ -139,6 +149,7 @@ export class InvestigationsService {
     const { steps, agentTasks, findings, recommendations, events, ...base } = inv;
     return {
       ...base,
+      meta: runMeta(events),
       steps: steps.map((s) => ({
         id: s.id,
         order: s.order,
@@ -191,6 +202,79 @@ export class InvestigationsService {
         createdAt: e.createdAt,
       })),
     };
+  }
+
+  /** Phase 10: the full agent/context trail of one investigation plus its evidence graph. */
+  async trace(organizationId: string, id: string): Promise<InvestigationTrace> {
+    const inv = await this.prisma.investigation.findFirst({
+      where: { id, organizationId },
+      include: {
+        monitor: { select: { id: true, name: true } },
+        steps: { orderBy: { order: 'asc' } },
+        agentTasks: { orderBy: [{ startedAt: 'asc' }, { createdAt: 'asc' }] },
+        evidence: { orderBy: [{ collectedAt: 'asc' }, { createdAt: 'asc' }] },
+        findings: {
+          orderBy: [{ isRootCause: 'desc' }, { confidence: 'desc' }],
+          include: { evidenceLinks: { select: { evidenceId: true } } },
+        },
+        recommendations: {
+          orderBy: { createdAt: 'asc' },
+          include: { findingLinks: { select: { findingId: true } } },
+        },
+        agentMessages: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
+        contextSnapshots: { orderBy: { createdAt: 'asc' } },
+        events: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+    if (!inv) throw new NotFoundException('Investigation not found');
+
+    return buildTrace({
+      investigation: inv,
+      steps: inv.steps,
+      tasks: inv.agentTasks,
+      evidence: inv.evidence,
+      findings: inv.findings.map((f) => ({
+        id: f.id,
+        agentType: f.agentType,
+        analyticsType: f.analyticsType,
+        statement: f.statement,
+        confidence: f.confidence,
+        isRootCause: f.isRootCause,
+        evidenceIds: f.evidenceLinks.map((l) => l.evidenceId),
+      })),
+      recommendations: inv.recommendations.map((r) => ({
+        id: r.id,
+        title: r.title,
+        description: r.description,
+        priority: r.priority,
+        expectedImpact: r.expectedImpact,
+        findingIds: r.findingLinks.map((l) => l.findingId),
+      })),
+      messages: inv.agentMessages.map((m) => ({
+        id: m.id,
+        type: m.type,
+        agentTaskId: m.agentTaskId,
+        fromAgent: m.fromAgent,
+        toAgent: m.toAgent,
+        payload: m.payload,
+        correlationId: m.correlationId,
+        createdAt: m.createdAt,
+      })),
+      contextSnapshots: inv.contextSnapshots.map((c) => ({
+        id: c.id,
+        agentTaskId: c.agentTaskId,
+        agentType: c.agentType,
+        tokenCount: c.tokenCount,
+        createdAt: c.createdAt,
+        assembledContext: c.assembledContext,
+      })),
+      events: inv.events.map((e) => ({
+        id: e.id,
+        type: e.type,
+        payload: e.payload,
+        createdAt: e.createdAt,
+      })),
+    });
   }
 
   async cancel(organizationId: string, id: string, userId: string): Promise<Investigation> {

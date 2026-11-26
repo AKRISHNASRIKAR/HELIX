@@ -20,6 +20,22 @@ export class NotificationsService {
     return this.prisma.notification.create({ data: input });
   }
 
+  /** Sends the same notice to every member of the organization (all roles). Returns how many. */
+  async notifyOrganization(
+    organizationId: string,
+    input: Omit<CreateNotification, 'userId' | 'organizationId'>,
+  ): Promise<number> {
+    const members = await this.prisma.organizationMember.findMany({
+      where: { organizationId },
+      select: { userId: true },
+    });
+    if (members.length === 0) return 0;
+    const res = await this.prisma.notification.createMany({
+      data: members.map((m) => ({ ...input, userId: m.userId, organizationId })),
+    });
+    return res.count;
+  }
+
   list(userId: string, unreadOnly: boolean): Promise<Notification[]> {
     return this.prisma.notification.findMany({
       where: { userId, ...(unreadOnly ? { readAt: null } : {}) },

@@ -10,6 +10,8 @@ export interface RuntimeAgent {
   version?: string;
   status: 'IDLE' | 'BUSY' | 'UNAVAILABLE';
   capabilities: { name: string; description: string }[];
+  /** Phase 6: what context the agent asks the context engine for (passed through as-is). */
+  contextRequirements?: Record<string, unknown> | null;
 }
 
 /** Spec D `POST /investigations/run` request body. */
@@ -20,6 +22,8 @@ export interface RunInvestigationRequest {
     projectId: string;
     question: string;
     triggerType: string;
+    /** Phase 9: the anomaly that opened a monitor investigation, else null. */
+    triggerContext: Record<string, unknown> | null;
   };
   dataSources: {
     id: string;
@@ -33,7 +37,8 @@ export interface RunInvestigationRequest {
   }[];
 }
 
-export const RUN_TIMEOUT_MS = 120_000;
+// Multi-agent runs (several waves plus synthesis) can take minutes.
+export const RUN_TIMEOUT_MS = 300_000;
 
 /** HTTP client for services/agent-runtime. Injectable so tests can mock it. */
 @Injectable()

@@ -20,10 +20,10 @@ const clamp01 = (v: number | null | undefined) =>
   v === null || v === undefined || Number.isNaN(v) ? null : Math.min(1, Math.max(0, v));
 
 /**
- * Phase 5 investigation runner. Hands a freshly created investigation to the
- * agent runtime's Coordinator, then persists the whole trail (steps, tasks,
- * evidence, findings, recommendations, metrics, anomalies) in one
- * transaction. Runs detached from the HTTP request and never throws: any
+ * Investigation runner. Hands a freshly created investigation to the agent
+ * runtime's Coordinator, then persists the whole trail (steps, tasks,
+ * evidence, findings, recommendations, metrics, anomalies, A2A messages,
+ * context snapshots) in one transaction. Runs detached from the HTTP request and never throws: any
  * failure ends as status FAILED with an explanatory summary.
  */
 @Injectable()
@@ -105,6 +105,7 @@ export class InvestigationRunnerService implements OnModuleDestroy {
       overallConfidence: clamp01(r.overallConfidence),
       rootCauseFindingId: r.rootCauseFindingId ?? null,
       findings: r.findings.length,
+      meta: r.meta,
       ...(cancelled ? { cancelled: true } : {}),
     });
     if (!cancelled) {
@@ -113,12 +114,7 @@ export class InvestigationRunnerService implements OnModuleDestroy {
         : r.status === 'PARTIALLY_COMPLETED'
           ? 'Investigation partially completed'
           : 'Investigation completed';
-      await this.notify(
-        inv,
-        failed ? 'investigation.failed' : 'investigation.completed',
-        title,
-        r.summary ?? inv.question,
-      );
+      await this.notify(inv, failed ? 'failed' : 'completed', title, r.summary ?? inv.question);
     }
   }
 
@@ -137,6 +133,10 @@ export class InvestigationRunnerService implements OnModuleDestroy {
         projectId: inv.projectId,
         question: inv.question,
         triggerType: inv.triggerType,
+        triggerContext:
+          inv.triggerContext && typeof inv.triggerContext === 'object'
+            ? (inv.triggerContext as Record<string, unknown>)
+            : null,
       },
       dataSources: sources.map((ds) => ({
         id: ds.id,
@@ -295,6 +295,36 @@ export class InvestigationRunnerService implements OnModuleDestroy {
           skipDuplicates: true,
         });
 
+        // A2A trail and per-task context. Task links are kept only for tasks we
+        // persisted; the rows themselves are kept either way.
+        const taskRef = (id: string | null | undefined) => (id && taskIds.has(id) ? id : null);
+        await tx.agentMessage.createMany({
+          data: r.messages.map((m) => ({
+            id: m.id,
+            investigationId: inv.id,
+            agentTaskId: taskRef(m.agentTaskId),
+            type: m.type,
+            fromAgent: m.fromAgent,
+            toAgent: m.toAgent,
+            payload: json(m.payload),
+            correlationId: m.correlationId,
+            createdAt: m.createdAt ?? now,
+          })),
+          skipDuplicates: true,
+        });
+        await tx.contextSnapshot.createMany({
+          data: r.contextSnapshots.map((c) => ({
+            id: c.id,
+            investigationId: inv.id,
+            agentTaskId: taskRef(c.agentTaskId),
+            agentType: c.agentType,
+            assembledContext: json(c.assembledContext),
+            tokenCount: c.tokenCount ?? null,
+            createdAt: c.createdAt ?? now,
+          })),
+          skipDuplicates: true,
+        });
+
         await tx.investigation.update({
           where: { id: inv.id },
           data: {
@@ -332,8 +362,7 @@ export class InvestigationRunnerService implements OnModuleDestroy {
         data: { startedAt: now },
       });
       await this.event(inv.id, 'investigation.failed', { status: 'FAILED', reason: summary });
-      if (res.count > 0)
-        await this.notify(inv, 'investigation.failed', 'Investigation failed', summary);
+      if (res.count > 0) await this.notify(inv, 'failed', 'Investigation failed', summary);
     } catch (err) {
       this.logger.error(`Could not record failure for ${inv.id}: ${(err as Error).message}`);
     }
@@ -351,17 +380,37 @@ export class InvestigationRunnerService implements OnModuleDestroy {
     }
   }
 
-  private async notify(inv: Investigation, type: string, title: string, body: string) {
-    if (!inv.createdByUserId) return;
+  /**
+   * The creator gets `investigation.<outcome>`. Investigations nobody created
+   * (opened by a monitor) notify every org member with
+   * `investigation.autonomous_<outcome>` instead.
+   */
+  private async notify(
+    inv: Investigation,
+    outcome: 'completed' | 'failed',
+    title: string,
+    body: string,
+  ) {
+    const notice = {
+      organizationId: inv.organizationId,
+      body: body.length > 500 ? `${body.slice(0, 497)}...` : body,
+      link: `/investigations/${inv.id}`,
+    };
     try {
-      await this.notifications.create({
-        userId: inv.createdByUserId,
-        organizationId: inv.organizationId,
-        type,
-        title,
-        body: body.length > 500 ? `${body.slice(0, 497)}...` : body,
-        link: `/investigations/${inv.id}`,
-      });
+      if (inv.createdByUserId) {
+        await this.notifications.create({
+          ...notice,
+          userId: inv.createdByUserId,
+          type: `investigation.${outcome}`,
+          title,
+        });
+      } else {
+        await this.notifications.notifyOrganization(inv.organizationId, {
+          ...notice,
+          type: `investigation.autonomous_${outcome}`,
+          title: `Autonomous ${title.charAt(0).toLowerCase()}${title.slice(1)}`,
+        });
+      }
     } catch (err) {
       this.logger.error(`Could not notify for ${inv.id}: ${(err as Error).message}`);
     }

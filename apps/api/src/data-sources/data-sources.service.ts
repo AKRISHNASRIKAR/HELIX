@@ -25,6 +25,7 @@ import {
   ProfileResult,
 } from '../clients/ingestion.client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateDataSourceInput, isConfigurable, validateUpdate } from './data-source-types';
 import { SecretsService } from './secrets.service';
 
 export interface DataSourceListItem {
@@ -58,8 +59,13 @@ export interface PostgresConfig {
 
 type DataSourceWithCredential = DataSource & { credential: DataSourceCredential | null };
 
-/** Only these types can actually be connected today (Phase 2). */
-const CONNECTABLE: DataSourceType[] = [DataSourceType.POSTGRESQL, DataSourceType.CSV];
+/** Types the ingestion service can connect to (MCP and GITHUB since Phase 7). */
+const CONNECTABLE: DataSourceType[] = [
+  DataSourceType.POSTGRESQL,
+  DataSourceType.CSV,
+  DataSourceType.MCP,
+  DataSourceType.GITHUB,
+];
 
 @Injectable()
 export class DataSourcesService {
@@ -106,17 +112,20 @@ export class DataSourcesService {
 
   // ------------------------------------------------------------------ writes
 
-  async createPostgres(
-    organizationId: string,
-    input: { name: string; config: PostgresConfig; credentials: Record<string, unknown> },
-  ): Promise<DataSourceDetail> {
+  /**
+   * POSTGRESQL, MCP or GITHUB from a validated body. Credentials (when any)
+   * are encrypted into DataSourceCredential; config holds no secrets.
+   */
+  async create(organizationId: string, input: CreateDataSourceInput): Promise<DataSourceDetail> {
+    const credentials = (input.credentials ?? {}) as Record<string, unknown>;
+    const hasCredentials = Object.values(credentials).some((v) => v !== undefined);
     const ds = await this.prisma.dataSource.create({
       data: {
         organizationId,
         name: input.name,
-        type: DataSourceType.POSTGRESQL,
+        type: input.type,
         connectionConfig: input.config as unknown as Prisma.InputJsonObject,
-        credential: { create: this.secrets.encrypt(input.credentials) },
+        ...(hasCredentials ? { credential: { create: this.secrets.encrypt(credentials) } } : {}),
       },
     });
     await this.connectAndDiscover(ds.id);
@@ -145,28 +154,41 @@ export class DataSourcesService {
     id: string,
     input: {
       name?: string;
-      config?: Partial<PostgresConfig>;
+      config?: Record<string, unknown>;
       credentials?: Record<string, unknown>;
     },
   ): Promise<DataSourceDetail> {
     const ds = await this.findOwned(organizationId, id);
     const reconnect = input.config !== undefined || input.credentials !== undefined;
-    if (reconnect && ds.type !== DataSourceType.POSTGRESQL) {
-      throw new BadRequestException(
-        'Only POSTGRESQL data sources accept config/credentials updates',
+    let patch: { config?: Record<string, unknown>; credentials?: Record<string, unknown> } = {};
+    if (reconnect) {
+      if (!isConfigurable(ds.type)) {
+        throw new BadRequestException(
+          'Only POSTGRESQL, MCP and GITHUB data sources accept config/credentials updates',
+        );
+      }
+      const checked = validateUpdate(
+        ds.type,
+        ds.connectionConfig as Record<string, unknown>,
+        input,
       );
+      if (!checked.ok) {
+        throw new BadRequestException({
+          statusCode: 400,
+          message: 'Validation failed',
+          issues: checked.issues,
+        });
+      }
+      patch = checked.value;
     }
 
     const data: Prisma.DataSourceUpdateInput = {};
     if (input.name !== undefined) data.name = input.name;
-    if (input.config !== undefined) {
-      data.connectionConfig = {
-        ...(ds.connectionConfig as Record<string, unknown>),
-        ...input.config,
-      } as Prisma.InputJsonObject;
+    if (patch.config !== undefined) {
+      data.connectionConfig = patch.config as Prisma.InputJsonObject;
     }
-    if (input.credentials !== undefined) {
-      const enc = this.secrets.encrypt(input.credentials);
+    if (patch.credentials !== undefined) {
+      const enc = this.secrets.encrypt(patch.credentials);
       data.credential = { upsert: { create: enc, update: enc } };
     }
     await this.prisma.dataSource.update({ where: { id }, data });

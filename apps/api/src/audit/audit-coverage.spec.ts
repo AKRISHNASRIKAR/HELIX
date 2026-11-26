@@ -5,6 +5,7 @@ import { AuthController } from '../auth/auth.controller';
 import { DataSourcesController } from '../data-sources/data-sources.controller';
 import { InternalController } from '../internal/internal.controller';
 import { InvestigationsController } from '../investigations/investigations.controller';
+import { MonitorsController } from '../monitors/monitors.controller';
 import { NotificationsController } from '../notifications/notifications.controller';
 import { OrganizationsController } from '../organizations/organizations.controller';
 import { ProjectsController } from '../projects/projects.controller';
@@ -14,6 +15,7 @@ const CONTROLLERS = [
   DataSourcesController,
   InternalController,
   InvestigationsController,
+  MonitorsController,
   NotificationsController,
   OrganizationsController,
   ProjectsController,

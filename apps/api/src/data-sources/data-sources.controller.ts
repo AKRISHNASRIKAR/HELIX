@@ -24,30 +24,14 @@ import type { TenantContext } from '../common/types';
 import { UuidPipe } from '../common/uuid-param.pipe';
 import { validateEnv } from '../config/env';
 import { TenantScoped } from '../tenant/tenant.guard';
+import {
+  CreateDataSourceInput,
+  CreateDataSourceSchema,
+  UpdateDataSourceInput,
+  UpdateDataSourceSchema,
+} from './data-source-types';
 import { DataSourceDetail, DataSourceListItem, DataSourcesService } from './data-sources.service';
 
-const PostgresConfigSchema = z.object({
-  host: z.string().trim().min(1),
-  port: z.coerce.number().int().min(1).max(65535).default(5432),
-  database: z.string().trim().min(1),
-  schema: z.string().trim().min(1).optional(),
-  sslmode: z.string().trim().min(1).optional(),
-});
-const CredentialsSchema = z.object({ user: z.string().min(1), password: z.string() }).passthrough();
-
-const CreateDataSourceSchema = z.object({
-  name: z.string().trim().min(1).max(200),
-  type: z.literal('POSTGRESQL'),
-  config: PostgresConfigSchema,
-  credentials: CredentialsSchema,
-});
-const UpdateDataSourceSchema = z
-  .object({
-    name: z.string().trim().min(1).max(200).optional(),
-    config: PostgresConfigSchema.partial().optional(),
-    credentials: CredentialsSchema.optional(),
-  })
-  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update' });
 const PreviewQuerySchema = z.object({
   table: z.string().min(1),
   limit: z.coerce.number().int().min(1).max(500).optional(),
@@ -91,17 +75,18 @@ export class DataSourcesController {
 
   @Post()
   @ApiOperation({
-    summary: 'Register a Postgres data source',
+    summary: 'Register a POSTGRESQL, MCP or GITHUB data source',
     description:
-      'Stores credentials encrypted, then attempts a connection. Responds 201 either way; ' +
-      'status is CONNECTED (schemas discovered) or ERROR (statusMessage explains why).',
+      '`type` selects the config shape (missing type = POSTGRESQL). Stores credentials ' +
+      'encrypted, then attempts a connection. Responds 201 either way; status is CONNECTED ' +
+      '(schemas discovered) or ERROR (statusMessage explains why).',
   })
   @Audit({ action: 'data_source.create', resourceType: 'data_source' })
   create(
     @Tenant() t: TenantContext,
-    @ZodBody(CreateDataSourceSchema) body: z.infer<typeof CreateDataSourceSchema>,
+    @ZodBody(CreateDataSourceSchema) body: CreateDataSourceInput,
   ): Promise<DataSourceDetail> {
-    return this.dataSources.createPostgres(t.organizationId, body);
+    return this.dataSources.create(t.organizationId, body);
   }
 
   @Post('upload')
@@ -150,12 +135,17 @@ export class DataSourcesController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Rename, or change config/credentials (triggers a reconnect)' })
+  @ApiOperation({
+    summary: 'Rename, or change config/credentials (triggers a reconnect)',
+    description:
+      'config is merged into the existing config and validated for the source type; ' +
+      'credentials replace the stored ones. POSTGRESQL, MCP and GITHUB only.',
+  })
   @Audit({ action: 'data_source.update', resourceType: 'data_source' })
   update(
     @Tenant() t: TenantContext,
     @Param('id', UuidPipe) id: string,
-    @ZodBody(UpdateDataSourceSchema) body: z.infer<typeof UpdateDataSourceSchema>,
+    @ZodBody(UpdateDataSourceSchema) body: UpdateDataSourceInput,
   ): Promise<DataSourceDetail> {
     return this.dataSources.update(t.organizationId, id, body);
   }

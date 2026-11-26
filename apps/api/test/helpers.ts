@@ -5,6 +5,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/bootstrap';
 import { AgentRuntimeClient } from '../src/clients/agent-runtime.client';
+import { AnalyticsEngineClient } from '../src/clients/analytics-engine.client';
 import { IngestionClient } from '../src/clients/ingestion.client';
 
 export const API = '/api/v1';
@@ -14,6 +15,7 @@ export function mockClients() {
   return {
     ingestion: { connect: jest.fn(), preview: jest.fn(), profile: jest.fn() },
     agentRuntime: { listAgents: jest.fn(), runInvestigation: jest.fn() },
+    analyticsEngine: { detectAnomalies: jest.fn() },
   };
 }
 export type MockClients = ReturnType<typeof mockClients>;
@@ -24,6 +26,8 @@ export async function createApp(mocks: MockClients): Promise<INestApplication> {
     .useValue(mocks.ingestion)
     .overrideProvider(AgentRuntimeClient)
     .useValue(mocks.agentRuntime)
+    .overrideProvider(AnalyticsEngineClient)
+    .useValue(mocks.analyticsEngine)
     .compile();
   const app = moduleRef.createNestApplication();
   configureApp(app);

@@ -18,6 +18,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { InternalModule } from './internal/internal.module';
 import { AgentsModule } from './agents/agents.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { MonitorsModule } from './monitors/monitors.module';
 import { validateEnv } from './config/env';
 
 // HELIX_DEMO=1 swaps every Postgres/Redis-backed module for fixture data, so
@@ -41,6 +42,7 @@ const PLATFORM_MODULES = [
   InternalModule,
   AgentsModule,
   DashboardModule,
+  MonitorsModule,
 ];
 
 @Module({
