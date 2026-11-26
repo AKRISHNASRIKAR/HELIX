@@ -2,7 +2,9 @@
 reports (see docs/architecture/analytics-engine.md and the build spec,
 section C). Endpoints load a dataset (inline rows or ingestion /extract),
 compute with pandas / numpy / scipy / statsmodels (via analytics/*), and
-return structured results that each carry a `computationMethod`.
+return structured results that each carry a `computationMethod`. Diagnostic
+endpoints (/segments/compare, /correlation, /events/align) live in
+diagnostics.py.
 
 Errors: 422 `{detail}` for bad specs or unusable data, 502 `{detail}` when
 the ingestion service is unreachable.
@@ -25,14 +27,21 @@ from .analyses import (
 )
 from .config import settings
 from .dataset import load_frame
+from .diagnostics import compute_correlation, compute_event_alignment, compute_segments
 from .errors import AnalyticsError
 from .models import (
     AnomalyRequest,
     AnomalyResponse,
+    CorrelationRequest,
+    CorrelationResponse,
+    EventsAlignRequest,
+    EventsAlignResponse,
     ForecastRequest,
     ForecastResponse,
     KpiRequest,
     KpiResponse,
+    SegmentCompareRequest,
+    SegmentCompareResponse,
     SeriesSpec,
     StatisticsRequest,
     StatisticsResponse,
@@ -104,3 +113,31 @@ async def anomalies(request: AnomalyRequest) -> dict:
 async def forecast(request: ForecastRequest) -> dict:
     df = await load_frame(request.dataset, _series_columns(request))
     return await asyncio.to_thread(compute_forecast, df, request)
+
+
+@app.post("/segments/compare", response_model=SegmentCompareResponse)
+async def segments_compare(request: SegmentCompareRequest) -> dict:
+    # Default dimensions are discovered from the data, so every column is needed.
+    columns = _series_columns(request) + list(request.dimensions) if request.dimensions else None
+    df = await load_frame(request.dataset, columns)
+    return await asyncio.to_thread(compute_segments, df, request)
+
+
+@app.post("/correlation", response_model=CorrelationResponse)
+async def correlation(request: CorrelationRequest) -> dict:
+    df_a, df_b = await asyncio.gather(
+        load_frame(request.a.dataset, _series_columns(request.a)),
+        load_frame(request.b.dataset, _series_columns(request.b)),
+    )
+    return await asyncio.to_thread(compute_correlation, df_a, df_b, request)
+
+
+@app.post("/events/align", response_model=EventsAlignResponse)
+async def events_align(request: EventsAlignRequest) -> dict:
+    spec = request.events
+    columns = None
+    if spec.label_columns is not None:
+        columns = [spec.time_column, spec.filter.column if spec.filter else None]
+        columns += spec.label_columns
+    df = await load_frame(spec.dataset, columns)
+    return await asyncio.to_thread(compute_event_alignment, df, request)

@@ -1,0 +1,13 @@
+[project]
+name = "helix-root-cause"
+version = "0.1.0"
+description = "Ranks root-cause candidates from multi-agent findings and evidence (anomaly, segment, event, co-anomaly signals)"
+requires-python = ">=3.11"
+dependencies = ["helix-contracts"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["helix_root_cause"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

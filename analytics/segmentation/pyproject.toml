@@ -1,0 +1,13 @@
+[project]
+name = "helix-segmentation"
+version = "0.1.0"
+description = "Segment comparison for a daily metric: which slice of which dimension explains a move"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2.0,<3", "pandas>=2.2,<3"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["helix_segmentation"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

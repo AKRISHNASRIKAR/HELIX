@@ -1,0 +1,14 @@
+{
+  "name": "@helix/segmentation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Turbo wrapper for the helix-segmentation Python package (segment comparison)",
+  "scripts": {
+    "build": "true",
+    "dev": "true",
+    "lint": "bash ../../scripts/python-run.sh lint",
+    "test": "bash ../../scripts/python-run.sh test",
+    "typecheck": "true",
+    "clean": "rm -rf .venv .pytest_cache **/__pycache__"
+  }
+}

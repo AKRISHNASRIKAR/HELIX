@@ -119,6 +119,48 @@ class StatisticsRequest(CamelModel):
     columns: list[str] | None = None
 
 
+class SegmentCompareRequest(SeriesSpec):
+    # Default: every object/category column with 2..20 distinct values, excluding
+    # timeColumn, valueColumn and the filter column.
+    dimensions: list[str] | None = Field(None, min_length=1)
+    target_date: str
+    baseline: Literal["same_weekday", "trailing_mean"] = "same_weekday"
+    baseline_periods: int = Field(4, ge=1, le=52)
+    metric_name: str | None = None
+
+
+class NamedSeriesSpec(SeriesSpec):
+    # Not in the base contract: optional display name echoed as a.name / b.name.
+    name: str | None = None
+
+
+class CorrelationRequest(CamelModel):
+    a: NamedSeriesSpec
+    b: NamedSeriesSpec
+    method: Literal["pearson", "spearman"] = "spearman"
+    max_lag: int = Field(3, ge=0, le=14)
+
+
+class EventsSpec(CamelModel):
+    dataset: DatasetRef
+    time_column: str
+    # Default: every column except timeColumn.
+    label_columns: list[str] | None = None
+    filter: FilterSpec | None = None
+
+
+class AlignTarget(CamelModel):
+    date: str
+    label: str | None = None
+
+
+class EventsAlignRequest(CamelModel):
+    events: EventsSpec
+    targets: list[AlignTarget] = Field(min_length=1)
+    window_hours_before: float = Field(24.0, ge=0, le=24 * 365)
+    window_hours_after: float = Field(24.0, ge=0, le=24 * 365)
+
+
 # -- responses -----------------------------------------------------------------
 
 
@@ -229,4 +271,69 @@ class ForecastResponse(CamelModel):
     forecast: list[ForecastPoint]
     method_used: str
     backtest: Backtest
+    computation_method: str = Field(min_length=1)
+
+
+class Change(CamelModel):
+    actual: float
+    expected: float
+    delta: float
+    delta_percent: float | None
+
+
+class SliceOut(Change):
+    value: str
+    share_of_delta: float
+
+
+class TopSliceOut(SliceOut):
+    column: str
+
+
+class DimensionOut(CamelModel):
+    column: str
+    concentration: float
+    slices: list[SliceOut]
+
+
+class SegmentCompareResponse(CamelModel):
+    target_date: str
+    metric_name: str
+    unit: str | None
+    aggregation: Aggregation
+    total: Change
+    dimensions: list[DimensionOut]
+    top_slice: TopSliceOut | None
+    computation_method: str = Field(min_length=1)
+
+
+class SeriesName(CamelModel):
+    name: str
+
+
+class CorrelationResponse(CamelModel):
+    coefficient: float
+    method: Literal["pearson", "spearman"]
+    lag: int
+    p_value: float | None
+    n: int
+    a: SeriesName
+    b: SeriesName
+    computation_method: str = Field(min_length=1)
+
+
+class AlignedEvent(CamelModel):
+    time: str
+    labels: dict[str, Any]
+    hours_before: float
+    same_day: bool
+
+
+class AlignMatch(CamelModel):
+    target: AlignTarget
+    events: list[AlignedEvent]
+
+
+class EventsAlignResponse(CamelModel):
+    matches: list[AlignMatch]
     computation_method: str = Field(min_length=1)

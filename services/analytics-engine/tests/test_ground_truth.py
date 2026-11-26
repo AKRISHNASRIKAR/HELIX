@@ -160,3 +160,69 @@ def test_time_and_currency_columns_match_agent_heuristics(rows):
     body = _detect(rows, valueColumn="amount")
     assert body["methodUsed"] == "seasonal"
     assert "seasonal strength" in body["computationMethod"]
+
+
+# -- diagnostics (segments, correlation) ---------------------------------------------
+
+
+def _segments(rows, **spec) -> dict:
+    response = client.post(
+        "/segments/compare",
+        json={"dataset": {"rows": rows}, "timeColumn": "created_at", "targetDate": "2026-10-08",
+              **spec},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_revenue_drop_is_concentrated_in_web(rows, orders, truth):
+    expected = next(a for a in truth["anomalies"] if a["metric"] == "revenue")
+    body = _segments(rows, valueColumn="amount", metricName="revenue", unit="USD")
+    top = body["topSlice"]
+    assert {top["column"]: top["value"]} == expected["segment"] == {"channel": "web"}
+    assert top["shareOfDelta"] > 0.8
+    assert body["dimensions"][0]["column"] == "channel"
+    assert body["total"]["delta"] < 0
+    # Independent pandas check of the web slice (same weekday, previous 4 weeks).
+    day = pd.to_datetime(orders["created_at"], utc=True).dt.strftime("%Y-%m-%d")
+    web = orders[orders["channel"] == "web"].groupby(day)["amount"].sum()
+    baseline = ["2026-09-10", "2026-09-17", "2026-09-24", "2026-10-01"]
+    assert top["actual"] == pytest.approx(web["2026-10-08"], rel=1e-12)
+    assert top["expected"] == pytest.approx(web[baseline].mean(), rel=1e-12)
+    # Customer segments are not the driver.
+    segment = next(d for d in body["dimensions"] if d["column"] == "segment")
+    assert segment["concentration"] < 0.5
+
+
+def test_order_count_drop_is_concentrated_in_web(rows):
+    body = _segments(rows, aggregation="count", metricName="orders")
+    top = body["topSlice"]
+    assert (top["column"], top["value"]) == ("channel", "web")
+    assert top["actual"] == 26
+    assert top["shareOfDelta"] > 0.8
+
+
+def test_completed_revenue_drop_is_concentrated_in_web(rows):
+    body = _segments(
+        rows, valueColumn="amount", filter={"column": "status", "op": "eq", "value": "completed"}
+    )
+    assert (body["topSlice"]["column"], body["topSlice"]["value"]) == ("channel", "web")
+    assert "status" not in [d["column"] for d in body["dimensions"]]
+
+
+def test_completed_and_total_revenue_correlate(rows):
+    def spec(**extra):
+        return {"dataset": {"rows": rows}, "timeColumn": "created_at", "valueColumn": "amount",
+                **extra}
+
+    response = client.post(
+        "/correlation",
+        json={"a": spec(), "b": spec(filter={"column": "status", "op": "eq",
+                                              "value": "completed"})},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["lag"] == 0
+    assert body["coefficient"] > 0.9
+    assert body["n"] == 90
+    assert body["pValue"] < 1e-6
