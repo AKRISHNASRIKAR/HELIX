@@ -1,0 +1,51 @@
+{
+  "description": "Seeded evaluation scenarios for HELIX (Phase 10). Each scenario asks a question against tests/fixtures/orders.csv (plus the mcp-demo deployments feed when available) and checks the result against tests/fixtures/ground_truth.json.",
+  "scenarios": [
+    {
+      "id": "revenue-drop",
+      "question": "Why did revenue drop last week?",
+      "expect": {
+        "status": ["COMPLETED", "PARTIALLY_COMPLETED"],
+        "rootCauseDate": ["2026-10-08"],
+        "rootCauseMentions": ["web"],
+        "rootCauseMentionsWithDeployments": ["web-checkout"],
+        "agents": ["ANALYTICS", "FINANCE", "CUSTOMER"],
+        "agentsWithDeployments": ["PRODUCT"]
+      }
+    },
+    {
+      "id": "refund-spike",
+      "question": "Why did refunds spike?",
+      "expect": {
+        "status": ["COMPLETED", "PARTIALLY_COMPLETED"],
+        "rootCauseDate": ["2026-10-08", "2026-10-09"],
+        "rootCauseMentions": [],
+        "agents": ["ANALYTICS", "FINANCE"]
+      }
+    },
+    {
+      "id": "orders-drop",
+      "question": "Why did orders fall on October 8?",
+      "expect": {
+        "status": ["COMPLETED", "PARTIALLY_COMPLETED"],
+        "rootCauseDate": ["2026-10-08"],
+        "rootCauseMentions": ["web"],
+        "agents": ["ANALYTICS"]
+      }
+    },
+    {
+      "id": "revenue-forecast",
+      "question": "What will revenue look like next week?",
+      "expect": {
+        "status": ["COMPLETED", "PARTIALLY_COMPLETED"],
+        "findingTypes": ["PREDICTIVE"],
+        "agents": ["ANALYTICS"]
+      }
+    }
+  ],
+  "autonomous": {
+    "metricKey": "revenue",
+    "expectDate": "2026-10-08",
+    "expectTriggerType": "ANOMALY_DETECTED"
+  }
+}

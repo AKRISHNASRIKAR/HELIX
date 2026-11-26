@@ -1,0 +1,273 @@
+{
+  "ranAt": "2026-11-26T18:53:43+00:00",
+  "api": "http://localhost:4100",
+  "deploymentsConnected": true,
+  "planners": "rules/rules",
+  "accuracy": {
+    "passed": 24,
+    "total": 24
+  },
+  "hallucination": {
+    "numbersChecked": 216,
+    "untracedNumbers": 0,
+    "rate": 0.0
+  },
+  "latency": {
+    "p50": 1.171,
+    "p95": 1.1884000000000001,
+    "max": 1.191
+  },
+  "scenarios": [
+    {
+      "id": "revenue-drop",
+      "question": "Why did revenue drop last week?",
+      "investigationId": "84d7befc-b0b7-4119-bc2b-39ae7ac1da8b",
+      "status": "COMPLETED",
+      "latencySeconds": 1.171,
+      "rootCause": "Revenue dropped 38.8% on Thursday 2026-10-08 because web orders collapsed (channel = web alone accounts for more than the full $12,621.71 shortfall, while other channel values moved the other way), starting shortly after the web-checkout v2.14.0 deploy at 08:40 UTC (later rolled back); refunds also spiked on 2026-10-08 and 2026-10-09; active customers also dropped on 2026-10-08. Customer segment mix was ruled out as the driver.",
+      "score": {
+        "checks": [
+          {
+            "name": "status",
+            "ok": true,
+            "detail": "status COMPLETED"
+          },
+          {
+            "name": "root cause date",
+            "ok": true,
+            "detail": "expected one of ['2026-10-08']; got: Revenue dropped 38.8% on Thursday 2026-10-08 because web orders collapsed (channel = web alone accounts for more than the full $12,621.71 shortfall, while other channel values moved the other way), starting shortly after the web-checkout v2.14.0 deploy at 08:40 UTC (later rolled back); refunds also spiked on 2026-10-08 and 2026-10-09; active customers also dropped on 2026-10-08. Customer segment mix was ruled out as the driver."
+          },
+          {
+            "name": "root cause mentions 'web'",
+            "ok": true,
+            "detail": "Revenue dropped 38.8% on Thursday 2026-10-08 because web orders collapsed (channel = web alone accounts for more than the full $12,621.71 shortfall, while other channel values moved the other way), starting shortly after the web-checkout v2.14.0 deploy at 08:40 UTC (later rolled back); refunds also spiked on 2026-10-08 and 2026-10-09; active customers also dropped on 2026-10-08. Customer segment mix was ruled out as the driver."
+          },
+          {
+            "name": "root cause mentions 'web-checkout'",
+            "ok": true,
+            "detail": "Revenue dropped 38.8% on Thursday 2026-10-08 because web orders collapsed (channel = web alone accounts for more than the full $12,621.71 shortfall, while other channel values moved the other way), starting shortly after the web-checkout v2.14.0 deploy at 08:40 UTC (later rolled back); refunds also spiked on 2026-10-08 and 2026-10-09; active customers also dropped on 2026-10-08. Customer segment mix was ruled out as the driver."
+          },
+          {
+            "name": "ANALYTICS agent succeeded",
+            "ok": true,
+            "detail": "succeeded: ['ANALYTICS', 'COORDINATOR', 'CUSTOMER', 'FINANCE', 'PRODUCT']"
+          },
+          {
+            "name": "FINANCE agent succeeded",
+            "ok": true,
+            "detail": "succeeded: ['ANALYTICS', 'COORDINATOR', 'CUSTOMER', 'FINANCE', 'PRODUCT']"
+          },
+          {
+            "name": "CUSTOMER agent succeeded",
+            "ok": true,
+            "detail": "succeeded: ['ANALYTICS', 'COORDINATOR', 'CUSTOMER', 'FINANCE', 'PRODUCT']"
+          },
+          {
+            "name": "PRODUCT agent succeeded",
+            "ok": true,
+            "detail": "succeeded: ['ANALYTICS', 'COORDINATOR', 'CUSTOMER', 'FINANCE', 'PRODUCT']"
+          }
+        ],
+        "passed": 8,
+        "total": 8
+      },
+      "hallucination": {
+        "numbersChecked": 49,
+        "untracedNumbers": 0,
+        "rate": 0.0,
+        "issues": []
+      }
+    },
+    {
+      "id": "refund-spike",
+      "question": "Why did refunds spike?",
+      "investigationId": "8a520154-d669-42b5-950c-c6d4b646673e",
+      "status": "COMPLETED",
+      "latencySeconds": 1.191,
+      "rootCause": "Refunds spiked on Thursday 2026-10-08 (37 against an expected 8), starting shortly after the web-checkout v2.14.0 deploy at 08:40 UTC (later rolled back); refunds also spiked on 2026-10-09.",
+      "score": {
+        "checks": [
+          {
+            "name": "status",
+            "ok": true,
+            "detail": "status COMPLETED"
+          },
+          {
+            "name": "root cause date",
+            "ok": true,
+            "detail": "expected one of ['2026-10-08', '2026-10-09']; got: Refunds spiked on Thursday 2026-10-08 (37 against an expected 8), starting shortly after the web-checkout v2.14.0 deploy at 08:40 UTC (later rolled back); refunds also spiked on 2026-10-09."
+          },
+          {
+            "name": "ANALYTICS agent succeeded",
+            "ok": true,
+            "detail": "succeeded: ['ANALYTICS', 'COORDINATOR', 'FINANCE', 'PRODUCT']"
+          },
+          {
+            "name": "FINANCE agent succeeded",
+            "ok": true,
+            "detail": "succeeded: ['ANALYTICS', 'COORDINATOR', 'FINANCE', 'PRODUCT']"
+          }
+        ],
+        "passed": 4,
+        "total": 4
+      },
+      "hallucination": {
+        "numbersChecked": 31,
+        "untracedNumbers": 0,
+        "rate": 0.0,
+        "issues": []
+      }
+    },
+    {
+      "id": "orders-drop",
+      "question": "Why did orders fall on October 8?",
+      "investigationId": "eac0d823-bd4b-42f4-a38a-390062e70cfb",
+      "status": "COMPLETED",
+      "latencySeconds": 1.178,
+      "rootCause": "Orders dropped 44.2% on Thursday 2026-10-08 because web orders collapsed (channel = web alone accounts for more than the full 138.50 shortfall, while other channel values moved the other way), starting shortly after the web-checkout v2.14.0 deploy at 08:40 UTC (later rolled back); refunds also spiked on 2026-10-08 and 2026-10-09; active customers also dropped on 2026-10-08. Customer segment mix was ruled out as the driver.",
+      "score": {
+        "checks": [
+          {
+            "name": "status",
+            "ok": true,
+            "detail": "status COMPLETED"
+          },
+          {
+            "name": "root cause date",
+            "ok": true,
+            "detail": "expected one of ['2026-10-08']; got: Orders dropped 44.2% on Thursday 2026-10-08 because web orders collapsed (channel = web alone accounts for more than the full 138.50 shortfall, while other channel values moved the other way), starting shortly after the web-checkout v2.14.0 deploy at 08:40 UTC (later rolled back); refunds also spiked on 2026-10-08 and 2026-10-09; active customers also dropped on 2026-10-08. Customer segment mix was ruled out as the driver."
+          },
+          {
+            "name": "root cause mentions 'web'",
+            "ok": true,
+            "detail": "Orders dropped 44.2% on Thursday 2026-10-08 because web orders collapsed (channel = web alone accounts for more than the full 138.50 shortfall, while other channel values moved the other way), starting shortly after the web-checkout v2.14.0 deploy at 08:40 UTC (later rolled back); refunds also spiked on 2026-10-08 and 2026-10-09; active customers also dropped on 2026-10-08. Customer segment mix was ruled out as the driver."
+          },
+          {
+            "name": "ANALYTICS agent succeeded",
+            "ok": true,
+            "detail": "succeeded: ['ANALYTICS', 'COORDINATOR', 'CUSTOMER', 'FINANCE', 'PRODUCT']"
+          }
+        ],
+        "passed": 4,
+        "total": 4
+      },
+      "hallucination": {
+        "numbersChecked": 49,
+        "untracedNumbers": 0,
+        "rate": 0.0,
+        "issues": []
+      }
+    },
+    {
+      "id": "revenue-forecast",
+      "question": "What will revenue look like next week?",
+      "investigationId": "e63a7c6c-8090-42f9-a126-b5b29fff1a85",
+      "status": "COMPLETED",
+      "latencySeconds": 0.932,
+      "rootCause": "Revenue dropped 38.8% on Thursday 2026-10-08 because web orders collapsed (channel = web alone accounts for more than the full $12,621.71 shortfall, while other channel values moved the other way); refunds also spiked on 2026-10-08 and 2026-10-09.",
+      "score": {
+        "checks": [
+          {
+            "name": "status",
+            "ok": true,
+            "detail": "status COMPLETED"
+          },
+          {
+            "name": "ANALYTICS agent succeeded",
+            "ok": true,
+            "detail": "succeeded: ['ANALYTICS', 'COORDINATOR', 'FINANCE']"
+          },
+          {
+            "name": "has PREDICTIVE finding",
+            "ok": true,
+            "detail": "types: ['DESCRIPTIVE', 'DIAGNOSTIC', 'PREDICTIVE']"
+          }
+        ],
+        "passed": 3,
+        "total": 3
+      },
+      "hallucination": {
+        "numbersChecked": 38,
+        "untracedNumbers": 0,
+        "rate": 0.0,
+        "issues": []
+      }
+    }
+  ],
+  "autonomous": {
+    "monitor": "54e23b5b-8533-4e5a-9ac1-2e9d8222bd57",
+    "first": {
+      "monitorId": "54e23b5b-8533-4e5a-9ac1-2e9d8222bd57",
+      "monitorName": "Daily revenue",
+      "status": "investigation_opened",
+      "message": "Opened an investigation for the CRITICAL drop on 2026-10-08.",
+      "anomaly": {
+        "date": "2026-10-08",
+        "timestamp": "2026-10-08T00:00:00Z",
+        "direction": "drop",
+        "severity": "CRITICAL",
+        "value": 19944.04,
+        "expectedValue": 33117.845909135205,
+        "deviationScore": -8.172006118835508,
+        "detectionMethod": "stl_seasonal",
+        "description": "Daily revenue on 2026-10-08 was 19,944.04, 39.8% below the expected 33,117.85 (deviation score -8.17, stl_seasonal)."
+      },
+      "investigationId": "89a66138-ab71-4515-bd33-672bdf85d10d"
+    },
+    "second": {
+      "monitorId": "54e23b5b-8533-4e5a-9ac1-2e9d8222bd57",
+      "monitorName": "Daily revenue",
+      "status": "deduped",
+      "message": "The CRITICAL drop on 2026-10-08 already opened an investigation.",
+      "anomaly": {
+        "date": "2026-10-08",
+        "timestamp": "2026-10-08T00:00:00Z",
+        "direction": "drop",
+        "severity": "CRITICAL",
+        "value": 19944.04,
+        "expectedValue": 33117.845909135205,
+        "deviationScore": -8.172006118835508,
+        "detectionMethod": "stl_seasonal",
+        "description": "Daily revenue on 2026-10-08 was 19,944.04, 39.8% below the expected 33,117.85 (deviation score -8.17, stl_seasonal)."
+      },
+      "investigationId": "89a66138-ab71-4515-bd33-672bdf85d10d"
+    },
+    "latencySeconds": 1.118,
+    "hallucination": {
+      "numbersChecked": 49,
+      "untracedNumbers": 0,
+      "rate": 0.0,
+      "issues": []
+    },
+    "question": "Investigate the 39.8% drop in Daily revenue detected on Thursday 2026-10-08",
+    "checks": [
+      {
+        "name": "first run opens an investigation",
+        "ok": true,
+        "detail": "{\"monitorId\": \"54e23b5b-8533-4e5a-9ac1-2e9d8222bd57\", \"monitorName\": \"Daily revenue\", \"status\": \"investigation_opened\", \"message\": \"Opened an investigation for the CRITICAL drop on 2026-10-08.\", \"anomaly\": {\"date\": \"2026-10-08\", \"timestamp\": \"2026-10-08T00:00:00Z\", \"direction\": \"drop\", \"severity\": \""
+      },
+      {
+        "name": "second run is deduplicated",
+        "ok": true,
+        "detail": "{\"monitorId\": \"54e23b5b-8533-4e5a-9ac1-2e9d8222bd57\", \"monitorName\": \"Daily revenue\", \"status\": \"deduped\", \"message\": \"The CRITICAL drop on 2026-10-08 already opened an investigation.\", \"anomaly\": {\"date\": \"2026-10-08\", \"timestamp\": \"2026-10-08T00:00:00Z\", \"direction\": \"drop\", \"severity\": \"CRITICAL\""
+      },
+      {
+        "name": "trigger type",
+        "ok": true,
+        "detail": "ANOMALY_DETECTED"
+      },
+      {
+        "name": "trigger date",
+        "ok": true,
+        "detail": "2026-10-08"
+      },
+      {
+        "name": "root cause date",
+        "ok": true,
+        "detail": "Revenue dropped 38.8% on Thursday 2026-10-08 because web orders collapsed (channel = web alone accounts for more than the full $12,621.71 shortfall, while other channel values moved the other way), starting shortly after the web-checkout v2.14.0 deploy at 08:40 UTC (later rolled back); refunds also spiked on 2026-10-08 and 2026-10-09; active customers also dropped on 2026-10-08. Customer segment mix was ruled out as the driver."
+      }
+    ],
+    "passed": 5,
+    "total": 5
+  }
+}
