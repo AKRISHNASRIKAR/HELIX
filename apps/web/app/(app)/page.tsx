@@ -8,13 +8,16 @@ import {
   getDataSources,
   getMe,
   getInvestigations,
+  getMonitors,
   getOverview,
+  getRecentAnomalies,
   getRevenue,
   getThroughput,
   type Kpi,
 } from '../../lib/api';
 import { countActive, formatDuration, formatTriggerType } from '../../lib/investigations';
-import { formatCurrency, formatDelta, formatPercent, formatRelative } from '../../lib/format';
+import { anomalyMetricName, autonomousInvestigations, summarizeMonitors } from '../../lib/monitoring';
+import { formatCurrency, formatDelta, formatPercent, formatRelative, formatUtcDay } from '../../lib/format';
 import { Panel, SeverityBadge } from '../../components/panel';
 import { AnomalyHeatmap, SegmentBars, Sparkline, ThroughputChart } from '../../components/charts';
 import { RevenueChart } from '../../components/revenue-chart';
@@ -37,8 +40,20 @@ function formatKpi(k: Kpi) {
 const LOWER_IS_BETTER = new Set(['anomalies', 'mttr']);
 
 export default async function DashboardPage() {
-  const [health, investigations, overview, revenue, anomalies, throughput, agents, sources, summary, me] =
-    await Promise.all([
+  const [
+    health,
+    investigations,
+    overview,
+    revenue,
+    anomalies,
+    throughput,
+    agents,
+    sources,
+    summary,
+    me,
+    monitors,
+    recentAnomalies,
+  ] = await Promise.all([
       getApiHealth(),
       getInvestigations(),
       getOverview(),
@@ -49,7 +64,12 @@ export default async function DashboardPage() {
       getDataSources(),
       getDashboardSummary(),
       getMe(),
+      getMonitors(),
+      getRecentAnomalies(5),
     ]);
+  const monitoring = monitors ? summarizeMonitors(monitors) : null;
+  const lastAnomaly = recentAnomalies?.[0] ?? null;
+  const autonomousCount = autonomousInvestigations(investigations).length;
 
   const recent = [...investigations]
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -136,7 +156,7 @@ export default async function DashboardPage() {
               <p className="text-xs font-medium text-[var(--text-muted)]">Step 1 {needsSource ? '' : '· done'}</p>
               <p className="mt-1 text-sm font-medium">Connect a data source</p>
               <p className="mt-1 text-[13px] text-[var(--text-secondary)]">
-                Point HELIX at a Postgres database or upload a CSV. Agents only read what you connect.
+                Point HELIX at a Postgres database, a CSV, an MCP server or a GitHub repository. Agents only read what you connect.
               </p>
               <Link href="/data-sources/new" className={`mt-3 ${buttonClass(needsSource ? 'primary' : 'secondary')}`}>
                 Connect a data source
@@ -247,7 +267,7 @@ export default async function DashboardPage() {
                     <p className={`text-sm font-semibold tabular-nums ${a.change < 0 ? 'text-[var(--text-bad)]' : 'text-[var(--text-primary)]'}`}>
                       {formatDelta(a.change)}
                     </p>
-                    <p className="text-[11px] text-[var(--text-muted)]">{formatRelative(a.detectedAt)}</p>
+                    <p className="text-[11px] text-[var(--text-muted)]">{formatUtcDay(a.detectedAt)}</p>
                   </div>
                 </li>
               ))}
@@ -273,7 +293,15 @@ export default async function DashboardPage() {
           </Panel>
         )}
         {agents && agents.length > 0 && (
-          <Panel title="Agent fleet" subtitle="Tasks handled for this organization">
+          <Panel
+            title="Agent fleet"
+            subtitle={`${agents.length} agents · tasks handled for this organization`}
+            action={
+              <Link href="/agents" className={`text-xs font-medium ${linkClass}`}>
+                Registry →
+              </Link>
+            }
+          >
             <table className="w-full text-sm">
               <thead className="text-left text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
                 <tr>
@@ -310,6 +338,59 @@ export default async function DashboardPage() {
           </Panel>
         )}
       </section>
+
+      {monitoring && (
+        <Panel
+          title="Monitoring"
+          subtitle="Autonomous anomaly monitors"
+          action={
+            <Link href="/monitoring" className={`text-xs font-medium ${linkClass}`}>
+              Manage →
+            </Link>
+          }
+        >
+          {monitoring.total === 0 ? (
+            <EmptyState title="No monitors yet" action={{ href: '/monitoring', label: 'Add a monitor' }}>
+              Monitors watch revenue, orders or refunds and open an investigation on their own when something breaks.
+            </EmptyState>
+          ) : (
+            <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <div>
+                <dt className="text-xs text-[var(--text-secondary)]">Monitors</dt>
+                <dd className="mt-1 text-xl font-semibold tabular-nums">
+                  {monitoring.total}
+                  <span className="ml-1.5 text-xs font-normal text-[var(--text-muted)]">{monitoring.enabled} enabled</span>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-[var(--text-secondary)]">Last run</dt>
+                <dd className="mt-1 text-sm font-medium">{formatRelative(monitoring.lastRunAt)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-[var(--text-secondary)]">Autonomous investigations</dt>
+                <dd className="mt-1 text-xl font-semibold tabular-nums">{autonomousCount}</dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="text-xs text-[var(--text-secondary)]">Last anomaly</dt>
+                <dd className="mt-1 text-sm">
+                  {lastAnomaly ? (
+                    <>
+                      <span className="block truncate font-medium" title={lastAnomaly.description}>
+                        {anomalyMetricName(lastAnomaly)}
+                      </span>
+                      <span className="text-xs text-[var(--text-muted)]">
+                        {lastAnomaly.severity.toString().toLowerCase()} · {formatUtcDay(lastAnomaly.detectedAt)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-[var(--text-muted)]">none recorded</span>
+                  )}
+                </dd>
+              </div>
+            </dl>
+          )}
+        </Panel>
+      )}
 
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Panel className="xl:col-span-2 !p-0">

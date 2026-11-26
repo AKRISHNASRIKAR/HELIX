@@ -23,7 +23,7 @@ export default async function DataSourcesPage() {
       <PageHeader
         eyebrow="Data"
         title="Data sources"
-        description="Databases and files your agents can read. HELIX discovers tables and column types on connect."
+        description="Databases, files, MCP servers and repositories your agents can read. HELIX discovers tables and column types on connect."
         actions={
           <Link href="/data-sources/new" className={buttonClass('primary')}>
             + Connect a source
@@ -36,7 +36,7 @@ export default async function DataSourcesPage() {
       ) : sources.length === 0 ? (
         <Panel>
           <EmptyState title="No data sources yet" action={{ href: '/data-sources/new', label: 'Connect a data source' }}>
-            Connect a PostgreSQL database or upload a CSV. Credentials are encrypted at rest and never shown again.
+            Connect a PostgreSQL database, upload a CSV, or connect an MCP server or GitHub repository. Credentials are encrypted at rest and never shown again.
           </EmptyState>
         </Panel>
       ) : (

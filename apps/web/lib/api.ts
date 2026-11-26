@@ -302,7 +302,38 @@ export type InvestigationDetail = Investigation & {
   findings?: InvestigationFinding[];
   recommendations?: InvestigationRecommendation[];
   events?: InvestigationEvent[];
+  /** Phase 8: set on monitor-opened (ANOMALY_DETECTED) investigations. */
+  triggerContext?: TriggerContext | null;
+  monitorId?: string | null;
+  monitor?: { id: string; name: string } | null;
+  meta?: RunMeta | null;
 };
+
+/** `Investigation.triggerContext` written by the monitor cycle (spec section 8). */
+export interface TriggerContext {
+  monitorId?: string;
+  metricKey?: string;
+  metricName?: string;
+  date?: string;
+  direction?: string;
+  severity?: string;
+  value?: number;
+  expectedValue?: number;
+  deviationScore?: number;
+  dataSourceId?: string;
+  table?: string;
+  [key: string]: unknown;
+}
+
+/** Coordinator run metadata (`result.meta`). */
+export interface RunMeta {
+  planner?: string;
+  summaryWriter?: string;
+  llmModel?: string;
+  llmCalls?: number;
+  llmErrors?: string[];
+  [key: string]: unknown;
+}
 
 /**
  * Fetches one investigation. Falls back to filtering the list if the detail
@@ -415,6 +446,15 @@ export interface ThroughputDay {
   question: number;
   scheduled: number;
 }
+export interface AgentContextRequirements {
+  semanticTypes?: string[];
+  tableKeywords?: string[];
+  dataSourceTypes?: string[] | null;
+  includeHistory?: boolean;
+  historyDays?: number;
+  includeUpstream?: boolean;
+  maxTokens?: number;
+}
 export interface AgentSummary {
   type: string;
   name: string;
@@ -422,7 +462,11 @@ export interface AgentSummary {
   tasks: number;
   successRate: number | null;
   avgMs: number | null;
+  description?: string | null;
+  version?: string | null;
   capabilities?: { name: string; description: string }[];
+  /** Passed through from the agent runtime when it provides it (Phase 6). */
+  contextRequirements?: AgentContextRequirements | null;
 }
 
 export const getOverview = () => getJson<Overview>('/analytics/overview');
@@ -430,3 +474,256 @@ export const getRevenue = () => getJson<RevenueData>('/analytics/revenue');
 export const getAnomalies = () => getJson<AnomalyData>('/analytics/anomalies');
 export const getThroughput = () => getJson<ThroughputDay[]>('/analytics/throughput');
 export const getAgents = () => getJson<AgentSummary[]>('/agents');
+
+// ------------------------------------------------------------ notifications
+
+export interface AppNotification {
+  id: string;
+  userId?: string;
+  organizationId: string | null;
+  type: string;
+  title: string;
+  body: string;
+  link: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+/** `GET /notifications` (newest first, max 100). Null when unavailable. */
+export async function getNotifications(unreadOnly = false): Promise<AppNotification[] | null> {
+  if (isDemoMode()) return null;
+  const list = await getJson<AppNotification[]>(`/notifications${unreadOnly ? '?unread=true' : ''}`);
+  return Array.isArray(list) ? list : null;
+}
+
+/**
+ * Unread notification count for the bell. Uses `GET /notifications/unread-count`
+ * and falls back to the dashboard summary. Null in demo mode or when unknown.
+ */
+export async function getUnreadNotificationCount(): Promise<number | null> {
+  if (isDemoMode()) return null;
+  const ctx = await readRequestContext();
+  if (!ctx.token) return null;
+  const res = await apiRequest<{ count: number }>('/notifications/unread-count', { redirectOn401: false });
+  if (res.ok && typeof res.data?.count === 'number') return res.data.count;
+  const summary = await apiRequest<DashboardSummary>('/dashboard/summary', { redirectOn401: false });
+  return summary.ok && typeof summary.data?.unreadNotifications === 'number' ? summary.data.unreadNotifications : null;
+}
+
+// ---------------------------------------------------------------- monitoring
+
+export type AnomalySeverityLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export type MonitorAggregation = 'sum' | 'mean' | 'count' | 'count_distinct';
+
+export interface Monitor {
+  id: string;
+  name: string;
+  projectId: string;
+  dataSourceId: string;
+  dataSource?: { id: string; name: string } | null;
+  metricKey: string;
+  tableName: string;
+  timeColumn: string;
+  valueColumn: string | null;
+  aggregation: MonitorAggregation | string;
+  filter?: unknown;
+  unit?: string | null;
+  minSeverity: AnomalySeverityLevel;
+  lookbackDays: number;
+  cooldownHours: number;
+  enabled: boolean;
+  lastRunAt: string | null;
+  /** ok | anomaly | investigation_opened | deduped | rate_limited | error */
+  lastStatus: string | null;
+  lastMessage: string | null;
+  investigationsCount?: number;
+  latestInvestigation?: { id: string; status: string; createdAt: string } | null;
+  createdAt?: string;
+}
+
+export interface MonitorSuggestion {
+  name: string;
+  metricKey: string;
+  dataSourceId: string;
+  dataSourceName: string;
+  tableName: string;
+  timeColumn: string;
+  valueColumn: string | null;
+  aggregation: MonitorAggregation | string;
+  filter: unknown;
+  unit: string | null;
+}
+
+export interface MonitorRunResult {
+  monitorId?: string;
+  monitorName?: string;
+  status: string;
+  message: string;
+  investigationId?: string | null;
+  anomaly?: Record<string, unknown> | null;
+}
+
+/** One row of `GET /anomalies` (persisted Anomaly rows, newest first). */
+export interface AnomalyRecord {
+  id: string;
+  description: string;
+  severity: AnomalySeverityLevel | string;
+  detectedAt: string;
+  detectionMethod?: string;
+  value: number;
+  expectedValue: number | null;
+  deviationScore: number | null;
+  dataSourceId?: string | null;
+  metricId?: string | null;
+  metricName?: string | null;
+  metric?: { id: string; name: string; unit?: string | null } | null;
+  investigationId?: string | null;
+  unit?: string | null;
+  dataSource?: { id: string; name: string } | null;
+  createdAt?: string;
+}
+
+export async function getMonitors(): Promise<Monitor[] | null> {
+  if (isDemoMode()) return null;
+  const list = await getJson<Monitor[]>('/monitors');
+  return Array.isArray(list) ? list : null;
+}
+export async function getMonitorSuggestions(): Promise<MonitorSuggestion[] | null> {
+  if (isDemoMode()) return null;
+  const list = await getJson<MonitorSuggestion[]>('/monitors/suggestions');
+  return Array.isArray(list) ? list : null;
+}
+export async function getRecentAnomalies(limit = 50): Promise<AnomalyRecord[] | null> {
+  if (isDemoMode()) return null;
+  const list = await getJson<AnomalyRecord[]>(`/anomalies?limit=${limit}`);
+  return Array.isArray(list) ? list : null;
+}
+
+// ------------------------------------------------------------------- trace
+
+export type TraceGraphNodeType =
+  | 'question'
+  | 'step'
+  | 'task'
+  | 'evidence'
+  | 'finding'
+  | 'rootCause'
+  | 'recommendation';
+export type TraceGraphEdgeKind = 'plans' | 'runs' | 'collected' | 'supports' | 'justifies' | 'selected';
+
+export interface TraceGraphNode {
+  id: string;
+  type: TraceGraphNodeType;
+  label: string;
+  agentType?: string;
+  confidence?: number | null;
+}
+export interface TraceGraphEdge {
+  from: string;
+  to: string;
+  kind: TraceGraphEdgeKind;
+}
+export interface TraceStep {
+  id: string;
+  order: number;
+  agentType: string;
+  objective: string;
+  dependsOn: number[];
+}
+export interface TraceTask {
+  id: string;
+  stepId: string | null;
+  agentType: string;
+  status: string;
+  objective: string;
+  error: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  durationMs: number | null;
+  contextSnapshotId: string | null;
+  findingIds: string[];
+  evidenceIds: string[];
+  /** The task's raw result JSON as returned by the agent. */
+  result?: unknown;
+}
+export interface TraceMessage {
+  id: string;
+  type: string;
+  agentTaskId: string | null;
+  fromAgent: string;
+  toAgent: string;
+  payload: Record<string, unknown> | null;
+  correlationId: string | null;
+  createdAt: string;
+}
+export interface TraceContextSnapshot {
+  id: string;
+  agentTaskId: string | null;
+  agentType: string;
+  tokenCount: number | null;
+  createdAt: string;
+  assembledContext: unknown;
+}
+export interface TraceEvidence {
+  id: string;
+  agentTaskId: string | null;
+  sourceType: string;
+  /** Free-form JSON (often a string or `{ engine, endpoint }`). */
+  source?: unknown;
+  summary: string;
+  data: unknown;
+  confidence: number | null;
+  collectedAt?: string | null;
+}
+export interface TraceFinding {
+  id: string;
+  agentType: string;
+  analyticsType: string;
+  statement: string;
+  confidence: number;
+  isRootCause: boolean;
+  evidenceIds: string[];
+  agentTaskId?: string | null;
+}
+export interface TraceRecommendation {
+  id: string;
+  title: string;
+  description: string | null;
+  priority: string;
+  expectedImpact: string | null;
+  findingIds: string[];
+}
+export interface InvestigationTrace {
+  investigation: {
+    id: string;
+    question: string;
+    status: string;
+    triggerType: string;
+    triggerContext: TriggerContext | null;
+    summary: string | null;
+    overallConfidence: number | null;
+    rootCauseFindingId: string | null;
+    createdAt: string;
+    startedAt: string | null;
+    completedAt: string | null;
+    monitor?: { id: string; name: string } | null;
+  };
+  plan: { steps?: unknown[]; reasoning?: string } | null;
+  meta: RunMeta | null;
+  steps: TraceStep[];
+  tasks: TraceTask[];
+  messages: TraceMessage[];
+  contextSnapshots: TraceContextSnapshot[];
+  events: InvestigationEvent[];
+  evidence: TraceEvidence[];
+  findings: TraceFinding[];
+  recommendations: TraceRecommendation[];
+  graph: { nodes: TraceGraphNode[]; edges: TraceGraphEdge[] } | null;
+}
+
+/** `GET /investigations/:id/trace`. Null when unavailable (older API, demo mode). */
+export async function getInvestigationTrace(id: string): Promise<InvestigationTrace | null> {
+  if (isDemoMode()) return null;
+  const trace = await getJson<InvestigationTrace>(`/investigations/${encodeURIComponent(id)}/trace`);
+  return trace && typeof trace === 'object' && trace.investigation ? trace : null;
+}

@@ -24,6 +24,19 @@ export function formatShortDate(value: string): string {
   });
 }
 
+/** A day-level timestamp (UTC midnight, e.g. an anomaly's day) as "Oct 8, 2026", never shifted by the viewer's timezone. */
+export function formatUtcDay(value: string | Date | null | undefined): string {
+  if (!value) return 'unknown';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'unknown';
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 export function formatRelative(value: string | Date | null | undefined, now = new Date()): string {
   if (!value) return 'never';
   const time = new Date(value).getTime();

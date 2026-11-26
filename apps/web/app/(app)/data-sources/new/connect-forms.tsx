@@ -1,7 +1,12 @@
 'use client';
 
 import { useActionState } from 'react';
-import { createPostgresSourceAction, uploadCsvSourceAction } from '../../../../lib/actions/data-sources';
+import {
+  createGithubSourceAction,
+  createMcpSourceAction,
+  createPostgresSourceAction,
+  uploadCsvSourceAction,
+} from '../../../../lib/actions/data-sources';
 import { INITIAL_FORM_STATE } from '../../../../lib/actions/form-state';
 import { FormMessage, SubmitButton } from '../../../../components/form-controls';
 import { Field, inputClass } from '../../../../components/ui';
@@ -64,6 +69,75 @@ export function CsvForm() {
       </Field>
       <FormMessage state={state} />
       <SubmitButton pendingLabel="Uploading and profiling...">Upload CSV</SubmitButton>
+    </form>
+  );
+}
+
+export function McpForm() {
+  const [state, action] = useActionState(createMcpSourceAction, INITIAL_FORM_STATE);
+  const v = state.values ?? {};
+  return (
+    <form action={action} className="space-y-4">
+      <Field id="mcp-name" label="Display name">
+        <input id="mcp-name" name="name" required placeholder="deployments-mcp" defaultValue={v.name} className={inputClass} />
+      </Field>
+      <Field id="mcp-url" label="Server URL" hint="Streamable HTTP endpoint. Tools named list_* or get_* without required inputs become tables.">
+        <input
+          id="mcp-url"
+          name="serverUrl"
+          type="url"
+          required
+          placeholder="http://localhost:8006/mcp"
+          autoCapitalize="off"
+          spellCheck={false}
+          aria-describedby="mcp-url-hint"
+          defaultValue={v.serverUrl}
+          className={inputClass}
+        />
+      </Field>
+      <Field id="mcp-token" label="Bearer token (optional)" hint="Sent as an Authorization header. Encrypted at rest.">
+        <input id="mcp-token" name="token" type="password" autoComplete="off" aria-describedby="mcp-token-hint" className={inputClass} />
+      </Field>
+      <FormMessage state={state} />
+      <SubmitButton pendingLabel="Connecting and discovering tools...">Connect MCP server</SubmitButton>
+    </form>
+  );
+}
+
+export function GithubForm() {
+  const [state, action] = useActionState(createGithubSourceAction, INITIAL_FORM_STATE);
+  const v = state.values ?? {};
+  return (
+    <form action={action} className="space-y-4">
+      <Field id="gh-name" label="Display name">
+        <input id="gh-name" name="name" required placeholder="web-app-repo" defaultValue={v.name} className={inputClass} />
+      </Field>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field id="gh-owner" label="Owner">
+          <input id="gh-owner" name="owner" required placeholder="acme" autoCapitalize="off" spellCheck={false} defaultValue={v.owner} className={inputClass} />
+        </Field>
+        <Field id="gh-repo" label="Repository">
+          <input id="gh-repo" name="repo" required placeholder="storefront" autoCapitalize="off" spellCheck={false} defaultValue={v.repo} className={inputClass} />
+        </Field>
+      </div>
+      <Field id="gh-token" label="Access token" hint="Read-only access to deployments, releases and commits is enough.">
+        <input id="gh-token" name="token" type="password" required autoComplete="off" aria-describedby="gh-token-hint" className={inputClass} />
+      </Field>
+      <Field id="gh-api" label="API URL (optional)" hint="Only for GitHub Enterprise. Defaults to https://api.github.com.">
+        <input
+          id="gh-api"
+          name="apiUrl"
+          type="url"
+          placeholder="https://api.github.com"
+          autoCapitalize="off"
+          spellCheck={false}
+          aria-describedby="gh-api-hint"
+          defaultValue={v.apiUrl}
+          className={inputClass}
+        />
+      </Field>
+      <FormMessage state={state} />
+      <SubmitButton pendingLabel="Connecting to GitHub...">Connect repository</SubmitButton>
     </form>
   );
 }

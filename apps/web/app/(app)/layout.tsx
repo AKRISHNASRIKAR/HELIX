@@ -4,10 +4,12 @@ import { NavLink } from '../../components/nav-link';
 import { NAV, SOON } from '../../components/nav';
 import { LogoMark } from '../../components/logo';
 import { OrgSwitcher } from '../../components/org-switcher';
+import { NotificationBell } from '../../components/notification-bell';
 import { logoutAction } from '../../lib/actions/auth';
 import {
   getAgents,
   getMe,
+  getUnreadNotificationCount,
   isDemoMode,
   readRequestContext,
   type AgentSummary,
@@ -22,7 +24,12 @@ export const dynamic = 'force-dynamic';
 /** Authenticated app chrome: sidebar (desktop), top bar (mobile), content. */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const demo = isDemoMode();
-  const [me, agents, ctx] = await Promise.all([getMe(), getAgents(), readRequestContext()]);
+  const [me, agents, ctx, unread] = await Promise.all([
+    getMe(),
+    getAgents(),
+    readRequestContext(),
+    getUnreadNotificationCount(),
+  ]);
 
   let active: Membership | null = null;
   if (me) {
@@ -44,7 +51,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <aside className="sticky top-0 flex h-screen flex-col px-4 py-5" aria-label="Sidebar">
           <div className="flex items-center gap-2.5 px-2">
             <LogoMark />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold tracking-tight">HELIX</p>
               {me && active && me.memberships.length > 1 ? (
                 <OrgSwitcher memberships={me.memberships} activeId={active.organizationId} />
@@ -52,6 +59,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 <p className="truncate text-[11px] text-[var(--text-muted)]">{orgLabel}</p>
               )}
             </div>
+            {me && <NotificationBell count={unread} />}
           </div>
 
           <nav className="mt-8 space-y-0.5" aria-label="Main">
@@ -80,7 +88,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </div>
 
       <div className="min-w-0 flex-1">
-        <MobileBar me={me} orgLabel={orgLabel} />
+        <MobileBar me={me} orgLabel={orgLabel} unread={unread} />
         <div className="mx-auto max-w-[1280px] px-4 py-6 sm:px-8 sm:py-8">{children}</div>
       </div>
     </div>
@@ -172,7 +180,7 @@ function UserMenu({ me }: { me: Me }) {
 }
 
 /** Small-screen top bar: brand, org, horizontally scrollable nav, sign out. */
-function MobileBar({ me, orgLabel }: { me: Me | null; orgLabel: string }) {
+function MobileBar({ me, orgLabel, unread }: { me: Me | null; orgLabel: string; unread: number | null }) {
   return (
     <div className="border-b border-[var(--border)] bg-[var(--surface)] lg:hidden">
       <div className="flex items-center justify-between gap-3 px-4 pt-3">
@@ -184,11 +192,14 @@ function MobileBar({ me, orgLabel }: { me: Me | null; orgLabel: string }) {
           </div>
         </div>
         {me && (
-          <form action={logoutAction}>
-            <button type="submit" className="rounded-md px-2 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--series-1)]">
-              Sign out
-            </button>
-          </form>
+          <div className="flex items-center gap-1">
+            <NotificationBell count={unread} />
+            <form action={logoutAction}>
+              <button type="submit" className="rounded-md px-2 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--series-1)]">
+                Sign out
+              </button>
+            </form>
+          </div>
         )}
       </div>
       <nav className="flex gap-1 overflow-x-auto px-3 py-2" aria-label="Main">

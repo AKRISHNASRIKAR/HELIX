@@ -41,6 +41,65 @@ export async function createPostgresSourceAction(_prev: FormState, formData: For
   redirect(`/data-sources/${res.data.id}`);
 }
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** Connect an MCP server (streamable HTTP). Its list_* tools become tables. */
+export async function createMcpSourceAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const values = { name: field(formData, 'name'), serverUrl: field(formData, 'serverUrl') };
+  // The token is never echoed back to the form.
+  const token = field(formData, 'token');
+  if (!values.name) return { error: 'Give the source a display name.', values };
+  if (!isHttpUrl(values.serverUrl)) return { error: 'Server URL must be an http(s) URL, for example http://localhost:8006/mcp.', values };
+
+  const res = await apiRequest<{ id: string }>('/data-sources', {
+    method: 'POST',
+    json: {
+      name: values.name,
+      type: 'MCP',
+      config: { serverUrl: values.serverUrl, transport: 'streamable_http' },
+      ...(token ? { credentials: { token } } : {}),
+    },
+  });
+  if (!res.ok) return { error: res.error, values };
+  revalidatePath('/data-sources');
+  redirect(`/data-sources/${res.data.id}`);
+}
+
+/** Connect a GitHub repository (deployments, releases, commits tables). */
+export async function createGithubSourceAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const values = {
+    name: field(formData, 'name'),
+    owner: field(formData, 'owner'),
+    repo: field(formData, 'repo'),
+    apiUrl: field(formData, 'apiUrl'),
+  };
+  const token = field(formData, 'token');
+  const missing = (['name', 'owner', 'repo'] as const).filter((k) => !values[k]);
+  if (missing.length > 0) return { error: `Fill in: ${missing.join(', ')}.`, values };
+  if (!token) return { error: 'A GitHub token is required.', values };
+  if (values.apiUrl && !isHttpUrl(values.apiUrl)) return { error: 'API URL must be an http(s) URL.', values };
+
+  const res = await apiRequest<{ id: string }>('/data-sources', {
+    method: 'POST',
+    json: {
+      name: values.name,
+      type: 'GITHUB',
+      config: { owner: values.owner, repo: values.repo, ...(values.apiUrl ? { apiUrl: values.apiUrl } : {}) },
+      credentials: { token },
+    },
+  });
+  if (!res.ok) return { error: res.error, values };
+  revalidatePath('/data-sources');
+  redirect(`/data-sources/${res.data.id}`);
+}
+
 /** Upload a CSV: forwards the multipart body (file + name) to the API with auth. */
 export async function uploadCsvSourceAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const name = field(formData, 'name');

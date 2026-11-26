@@ -15,6 +15,14 @@ import { SourceActions } from './source-actions';
 
 export const metadata = { title: 'Data source · HELIX' };
 
+const TYPE_EYEBROW: Record<string, string> = {
+  CSV: 'CSV upload',
+  POSTGRESQL: 'PostgreSQL',
+  MCP: 'MCP server',
+  GITHUB: 'GitHub repository',
+  REST_API: 'REST API',
+};
+
 export default async function DataSourceDetailPage({
   params,
   searchParams,
@@ -44,7 +52,7 @@ export default async function DataSourceDetailPage({
     <main className="space-y-6">
       <BackLink />
       <PageHeader
-        eyebrow={source.type === 'CSV' ? 'CSV upload' : source.type === 'POSTGRESQL' ? 'PostgreSQL' : source.type}
+        eyebrow={TYPE_EYEBROW[source.type] ?? source.type}
         title={
           <span className="flex flex-wrap items-center gap-3">
             {source.name}
@@ -70,7 +78,9 @@ export default async function DataSourceDetailPage({
         <Panel>
           <EmptyState title="No tables discovered">
             {source.status === 'CONNECTED'
-              ? 'The connection works but no tables were found in the configured schema.'
+              ? source.type === 'MCP'
+                ? 'The server is reachable but exposes no list_* or get_* tools without required inputs.'
+                : 'The connection works but no tables were found in the configured schema.'
               : 'Tables appear here once the source connects successfully.'}
           </EmptyState>
         </Panel>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatCell, formatDelta, formatNumber, formatPercent, formatRelative } from './format';
+import { formatCell, formatDelta, formatNumber, formatPercent, formatRelative, formatUtcDay } from './format';
 
 describe('formatRelative', () => {
   const now = new Date('2026-10-14T12:00:00Z');
@@ -29,5 +29,13 @@ describe('formatCell', () => {
     expect(formatCell(null)).toBe('null');
     expect(formatCell(12.5)).toBe('12.5');
     expect(formatCell({ a: 1 })).toBe('{"a":1}');
+  });
+});
+
+describe('formatUtcDay', () => {
+  it('shows the UTC day without shifting it into the viewer timezone', () => {
+    expect(formatUtcDay('2026-10-08T00:00:00.000Z')).toBe('Oct 8, 2026');
+    expect(formatUtcDay(null)).toBe('unknown');
+    expect(formatUtcDay('nope')).toBe('unknown');
   });
 });
