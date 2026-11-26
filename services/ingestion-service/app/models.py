@@ -22,7 +22,7 @@ class CamelModel(BaseModel):
 
 
 class ConnectionSpec(CamelModel):
-    type: Literal["POSTGRESQL", "CSV"]
+    type: Literal["POSTGRESQL", "CSV", "MCP", "GITHUB"]
     config: dict[str, Any] = Field(default_factory=dict)
     credentials: dict[str, Any] | None = None
     file_path: str | None = None

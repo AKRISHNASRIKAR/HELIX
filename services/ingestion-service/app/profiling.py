@@ -155,6 +155,20 @@ def physical_type(series: pd.Series) -> str:
     return "text"
 
 
+def column_types(df: pd.DataFrame) -> dict[str, str]:
+    """Physical types as pandas parsed them; text columns that are almost all
+    timestamps are reported as `timestamp` (values are left as strings)."""
+    types: dict[str, str] = {}
+    for name in df.columns:
+        kind = physical_type(df[name])
+        if kind == "text":
+            sample = df[name].dropna().head(1000)
+            if len(sample) and datetime_parse_rate(sample) >= 0.9:
+                kind = "timestamp"
+        types[str(name)] = kind
+    return types
+
+
 def profile_frame(df: pd.DataFrame, types: dict[str, str]) -> list[dict[str, Any]]:
     """nullRate, distinctCount and semanticType per column of a sample frame."""
     out = []

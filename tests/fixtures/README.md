@@ -9,12 +9,18 @@ end-to-end investigation evaluation later (see `docs/research/evaluation.md`).
 | `generate_orders.py` | Deterministic generator (numpy seed `20261014`). Re-running it reproduces `orders.csv` byte for byte. |
 | `orders.csv` | 23,916 orders, 2026-07-17 to 2026-10-14 inclusive (90 UTC days), ~1.7 MB. |
 | `ground_truth.json` | The injected anomalies and the intended root cause, machine-readable. |
+| `generate_deployments.py` | Deterministic generator (`random.Random(20261008)`, stdlib only) for `deployments.json`; also stamps `rootCause.trigger` into `ground_truth.json`. |
+| `deployments.json` | 40 production deploys over the same window, served by `services/mcp-demo` (`list_deployments`). |
 
 Regenerate with any Python that has numpy and pandas, for example:
 
 ```bash
 services/analytics-engine/.venv/bin/python tests/fixtures/generate_orders.py
+python3 tests/fixtures/generate_deployments.py   # after generate_orders.py
 ```
+
+`generate_orders.py` rewrites `ground_truth.json` without the deploy trigger,
+so always run `generate_deployments.py` after it.
 
 ## Columns
 
@@ -53,6 +59,27 @@ refunds spiking over the same two days.
 How the analytics engine is expected to address it (and what the agent
 heuristics use): time column `created_at`, value column `amount`, refunds via
 `filter: { column: "status", op: "in", value: ["refunded", "refund", "returned"] }`.
+
+## Deployments feed
+
+`deployments.json` is a JSON array of
+`{id, service, version, environment: "production", deployed_at (ISO UTC), author, description, status: success|rolled_back|failed, commit_sha}`
+across `web-checkout`, `mobile-api`, `partner-gateway`, `search`, `catalog`
+and `notifications`, weekdays in working hours. The planted facts:
+
+| Deploy | When (UTC) | Status | Description |
+|---|---|---|---|
+| `search` v3.14.0 | 2026-10-07 15:20 | success | Update synonym dictionary for autumn catalog terms (the decoy) |
+| `web-checkout` v2.14.0 | 2026-10-08 08:40 | rolled_back | New payment form and address validation for web checkout (the trigger) |
+| `web-checkout` v2.14.1 | 2026-10-09 06:15 | success | Revert payment form changes |
+
+Nothing else ships between 2026-10-06T12:00Z (36h before 2026-10-08) and the
+end of 2026-10-09, so the right answer is the web-checkout deploy a few hours
+into the drop day, and a ranking step has exactly one unrelated candidate to
+reject. `ground_truth.json` records it as
+`rootCause.trigger = {type: "deployment", service: "web-checkout", version: "v2.14.0", deployedAt: "2026-10-08T08:40:00Z"}`.
+`services/mcp-demo/tests/test_fixture.py` asserts these invariants and that
+the generator reproduces the committed file.
 
 ## Tolerances asserted by tests
 

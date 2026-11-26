@@ -1,6 +1,6 @@
 # ingestion-service
 
-Connects to external data (Postgres and CSV), discovers schema, previews,
+Connects to external data (Postgres, CSV, MCP servers and GitHub), discovers schema, previews,
 profiles and extracts rows, behind the `DataSourceAdapter` interface
 (`app/adapters/base.py`) so agents and the ingestion pipeline never hard-code
 a specific source type (project brief, section 11).
@@ -10,7 +10,7 @@ Port 8004 (`pnpm --filter @helix/ingestion-service dev`).
 ## Endpoints
 
 Every body carries either an inline `connection`
-(`{ type: "POSTGRESQL"|"CSV", config, credentials?, filePath? }`) or
+(`{ type: "POSTGRESQL"|"CSV"|"MCP"|"GITHUB", config, credentials?, filePath? }`) or
 `dataSourceId` + `organizationId`, which is resolved through apps/api's
 `GET /api/v1/internal/data-sources/:id/connection` with the
 `x-helix-internal-token` header.
@@ -44,6 +44,35 @@ cardinality, email pattern).
   sanitized stem of `config.originalName`. Handles UTF-8/BOM, cp1252 and
   latin-1, sniffs `, ; tab |`, rejects empty, binary and malformed files.
 
+- **McpAdapter** (`app/adapters/mcp.py`): the official `mcp` client SDK over
+  streamable HTTP. Config `{ serverUrl, transport: "streamable_http", toolPrefixes?: ["list_", "get_"] }`,
+  credentials `{ token? }` (sent as `Authorization: Bearer`). Every tool whose
+  name starts with a prefix and that has no required arguments becomes a
+  table named after the tool minus the prefix (`list_deployments` ->
+  `deployments`). Rows come from calling the tool with no arguments
+  (`structuredContent`, including FastMCP's `{ result: [...] }`, or JSON text
+  content); nested values are JSON strings. Each operation opens one short
+  session (`anyio.run` in the worker thread) under `INGESTION_SERVICE_MCP_TIMEOUT_SECONDS`.
+- **GithubAdapter** (`app/adapters/github.py`): REST API via sync httpx.
+  Config `{ owner, repo, apiUrl? }` (default `https://api.github.com`),
+  credentials `{ token? }`. Tables `deployments` (100 most recent, `status` =
+  latest deployment status), `releases` and `commits` (300 most recent).
+  Column names match the MCP deployments feed where they mean the same thing
+  (`service` = repo name, `version` = ref or tag, `deployed_at`, `author`,
+  `description`, `status`, `commit_sha`). Empty tables keep their columns.
+
+MCP and GitHub share `RowSourceAdapter` (`app/adapters/rows.py`): rows are
+fetched once per request, held as a DataFrame and profiled exactly like a CSV
+(capped at `INGESTION_SERVICE_API_SOURCE_MAX_ROWS`). Their errors (bad token,
+unreachable host, 404, rate limit, tool error, non-JSON output) are readable
+and never contain the token.
+
+Against the demo server (`services/mcp-demo`) discovery returns one table,
+`deployments`, 40 rows: `id` identifier, `service` categorical, `version`
+identifier, `environment` categorical, `deployed_at` datetime (type
+`timestamp`), `author` categorical, `description` text, `status` categorical,
+`commit_sha` identifier.
+
 All blocking work runs in `asyncio.to_thread`.
 
 ## Configuration
@@ -55,6 +84,9 @@ All blocking work runs in `asyncio.to_thread`.
 | `INGESTION_SERVICE_CSV_ROOT` | unset | If set, CSV `filePath`s must resolve inside it |
 | `INGESTION_SERVICE_CONNECT_TIMEOUT_SECONDS` | `5` | Postgres connect timeout |
 | `INGESTION_SERVICE_STATEMENT_TIMEOUT_MS` | `15000` | Discovery/preview/profile statement timeout |
+| `INGESTION_SERVICE_MCP_TIMEOUT_SECONDS` | `20` | Whole-operation timeout for one MCP session |
+| `INGESTION_SERVICE_GITHUB_TIMEOUT_SECONDS` | `15` | Per-request GitHub timeout |
+| `INGESTION_SERVICE_API_SOURCE_MAX_ROWS` | `100000` | Row cap per MCP/GitHub table |
 
 ## Tests
 
@@ -63,3 +95,8 @@ drop a throwaway schema in the local `helix_test` database (override with
 `HELIX_TEST_PG_*`); they skip if it is unreachable. The wrong-password test
 skips when the local server uses `trust` auth (passwords are not checked);
 the unknown-role and error-translation tests still cover that path.
+
+The MCP tests load `services/mcp-demo`'s ASGI app in-process (as
+`mcp_demo_app`) and serve it with uvicorn in a thread on an ephemeral port,
+stopped after the module. The GitHub tests use `httpx.MockTransport`; no test
+touches the network.

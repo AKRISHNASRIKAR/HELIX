@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     connect_sample_rows: int = 500
     # Above this many tables, /connect infers semanticType from names/types only.
     connect_sample_max_tables: int = 50
+    # API-backed sources (MCP, GitHub): whole-operation timeout and a row cap
+    # per table (their tables are held in memory for one request).
+    mcp_timeout_seconds: float = 20.0
+    github_timeout_seconds: float = 15.0
+    api_source_max_rows: int = 100_000
 
 
 settings = Settings()

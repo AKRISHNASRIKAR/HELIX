@@ -2,11 +2,15 @@ from ..errors import AdapterError
 from ..models import ConnectionSpec
 from .base import DataSourceAdapter
 from .csv import CsvAdapter
+from .github import GithubAdapter
+from .mcp import McpAdapter
 from .postgres import PostgresAdapter
 
 ADAPTERS: dict[str, type[DataSourceAdapter]] = {
     "POSTGRESQL": PostgresAdapter,
     "CSV": CsvAdapter,
+    "MCP": McpAdapter,
+    "GITHUB": GithubAdapter,
 }
 
 
@@ -18,4 +22,12 @@ def adapter_for(spec: ConnectionSpec) -> DataSourceAdapter:
     return adapter_cls(spec)
 
 
-__all__ = ["ADAPTERS", "CsvAdapter", "DataSourceAdapter", "PostgresAdapter", "adapter_for"]
+__all__ = [
+    "ADAPTERS",
+    "CsvAdapter",
+    "DataSourceAdapter",
+    "GithubAdapter",
+    "McpAdapter",
+    "PostgresAdapter",
+    "adapter_for",
+]

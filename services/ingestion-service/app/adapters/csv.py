@@ -24,13 +24,7 @@ import pandas as pd
 
 from ..config import settings
 from ..errors import AdapterError
-from ..profiling import (
-    datetime_parse_rate,
-    infer_semantic_type,
-    physical_type,
-    profile_frame,
-    to_json_rows,
-)
+from ..profiling import column_types, infer_semantic_type, profile_frame, to_json_rows
 from .base import DataSourceAdapter
 
 ENCODINGS = ("utf-8-sig", "cp1252", "latin-1")
@@ -48,20 +42,6 @@ def _sniff_delimiter(head: str) -> str:
         return csv.Sniffer().sniff(head, delimiters=",;\t|").delimiter
     except csv.Error:
         return ","
-
-
-def _column_types(df: pd.DataFrame) -> dict[str, str]:
-    """Physical types as pandas parsed them; text columns that are almost all
-    timestamps are reported as `timestamp` (values are left as strings)."""
-    types: dict[str, str] = {}
-    for name in df.columns:
-        kind = physical_type(df[name])
-        if kind == "text":
-            sample = df[name].dropna().head(1000)
-            if len(sample) and datetime_parse_rate(sample) >= 0.9:
-                kind = "timestamp"
-        types[str(name)] = kind
-    return types
 
 
 @lru_cache(maxsize=4)
@@ -101,7 +81,7 @@ def _load(path: str, _mtime_ns: int, _size: int) -> tuple[pd.DataFrame, dict[str
     if df.columns.empty:
         raise AdapterError("The CSV file has no columns.")
     df.columns = [str(c).strip() for c in df.columns]
-    return df, _column_types(df)
+    return df, column_types(df)
 
 
 class CsvAdapter(DataSourceAdapter):
