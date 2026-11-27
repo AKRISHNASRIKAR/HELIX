@@ -486,6 +486,35 @@ describe('Monitoring and trace (e2e)', () => {
       expect(app.get(MonitoringService).loopRunning).toBe(false);
     });
 
+    it('returns the monitored series with anomalies, read-only', async () => {
+      mocks.analyticsEngine.detectAnomalies.mockResolvedValueOnce(detection());
+      const before = await prisma.monitor.findUniqueOrThrow({ where: { id: monitorId } });
+      const invCount = await prisma.investigation.count({ where: { monitorId } });
+      const res = await as(app, viewer, orgId).get(`/monitors/${monitorId}/series`).expect(200);
+      expect(res.body).toMatchObject({
+        monitorId,
+        monitorName: 'Daily revenue',
+        unit: 'USD',
+        lookbackDays: 7,
+        minSeverity: 'HIGH',
+        methodUsed: 'seasonal',
+        seriesEnd: '2026-10-14',
+        anomalies: [{ date: '2026-10-08', severity: 'HIGH', direction: 'drop', value: 19950 }],
+        picked: { date: '2026-10-08', expectedValue: 33124 },
+      });
+      expect(res.body.series).toHaveLength(90);
+      expect(res.body.series[0]).toEqual({ date: '2026-07-17', value: 33000 });
+      // Reading the series neither opens investigations nor records a run.
+      const after = await prisma.monitor.findUniqueOrThrow({ where: { id: monitorId } });
+      expect(after.lastRunAt).toEqual(before.lastRunAt);
+      expect(await prisma.investigation.count({ where: { monitorId } })).toBe(invCount);
+
+      mocks.analyticsEngine.detectAnomalies.mockRejectedValueOnce(new Error('engine down'));
+      const down = await as(app, viewer, orgId).get(`/monitors/${monitorId}/series`).expect(503);
+      expect(down.body.message).toMatch(/engine down/);
+      await as(app, viewer, orgId).get(`/monitors/${randomUUID()}/series`).expect(404);
+    });
+
     it('lists anomalies with the investigation that found them', async () => {
       const res = await as(app, viewer, orgId).get('/anomalies?limit=10').expect(200);
       expect(res.body[0]).toMatchObject({

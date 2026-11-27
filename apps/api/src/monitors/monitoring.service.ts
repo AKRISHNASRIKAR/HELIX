@@ -1,4 +1,10 @@
-import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   DataSourceStatus,
@@ -8,7 +14,11 @@ import {
   type Monitor,
 } from '@helix/database';
 import { AuditService } from '../audit/audit.service';
-import { AnalyticsEngineClient, EngineFilter } from '../clients/analytics-engine.client';
+import {
+  AnalyticsEngineClient,
+  DetectAnomaliesResponse,
+  EngineFilter,
+} from '../clients/analytics-engine.client';
 import { UpstreamError } from '../clients/http';
 import type { ApiEnv } from '../config/env';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -45,6 +55,22 @@ export interface MonitorRunResult {
   message: string;
   investigationId?: string;
   anomaly?: MonitorRunAnomaly;
+}
+
+/** `GET /monitors/:id/series`: the daily series a monitor watches plus every anomaly the engine sees in it. */
+export interface MonitorSeriesView {
+  monitorId: string;
+  monitorName: string;
+  unit: string | null;
+  lookbackDays: number;
+  minSeverity: string;
+  methodUsed: string | null;
+  /** Last day of the series (YYYY-MM-DD), the lookback anchor. */
+  seriesEnd: string | null;
+  series: { date: string; value: number | null }[];
+  anomalies: MonitorRunAnomaly[];
+  /** The anomaly a run would act on now (lookback and severity filters applied), or null. */
+  picked: MonitorRunAnomaly | null;
 }
 
 type MonitorWithSource = Monitor & { dataSource: DataSource };
@@ -159,6 +185,62 @@ export class MonitoringService implements OnApplicationBootstrap, OnModuleDestro
     return result;
   }
 
+  /**
+   * Read-only: asks the engine for the monitor's daily series and anomalies
+   * (the same call a run makes) without opening anything or touching the
+   * monitor row. Throws ServiceUnavailableException when the engine fails.
+   */
+  async series(monitor: MonitorWithSource): Promise<MonitorSeriesView> {
+    let detected: DetectAnomaliesResponse;
+    try {
+      detected = await this.detect(monitor);
+    } catch (err) {
+      throw new ServiceUnavailableException(
+        `Anomaly detection failed: ${(err as Error).message}`,
+      );
+    }
+    const rawSeries = detected?.metric?.series ?? [];
+    const rawAnomalies = detected?.anomalies ?? [];
+    const choice = chooseAnomaly(rawSeries, rawAnomalies, {
+      lookbackDays: monitor.lookbackDays,
+      minSeverity: monitor.minSeverity,
+    });
+    return {
+      monitorId: monitor.id,
+      monitorName: monitor.name,
+      unit: monitor.unit,
+      lookbackDays: monitor.lookbackDays,
+      minSeverity: monitor.minSeverity,
+      methodUsed: detected?.methodUsed ?? null,
+      seriesEnd: choice.seriesEnd,
+      series: rawSeries.map((p) => ({
+        date: p.timestamp.slice(0, 10),
+        value: typeof p.value === 'number' && Number.isFinite(p.value) ? p.value : null,
+      })),
+      anomalies: rawAnomalies
+        .map((a) => toRunAnomaly({ ...a, date: a.timestamp.slice(0, 10) }))
+        .sort((x, y) => x.date.localeCompare(y.date)),
+      picked: choice.picked ? toRunAnomaly(choice.picked) : null,
+    };
+  }
+
+  private detect(monitor: MonitorWithSource): Promise<DetectAnomaliesResponse> {
+    return this.engine.detectAnomalies({
+      dataset: {
+        dataSourceId: monitor.dataSourceId,
+        organizationId: monitor.organizationId,
+        table: monitor.tableName,
+      },
+      timeColumn: monitor.timeColumn,
+      valueColumn: monitor.valueColumn,
+      aggregation: monitor.aggregation,
+      filter: (monitor.filter as EngineFilter | null) ?? null,
+      method: 'auto',
+      metricName: monitor.name,
+      unit: monitor.unit,
+    });
+  }
+
   private async evaluate(monitor: MonitorWithSource): Promise<MonitorRunResult> {
     if (monitor.dataSource.status !== DataSourceStatus.CONNECTED) {
       return this.result(
@@ -170,20 +252,7 @@ export class MonitoringService implements OnApplicationBootstrap, OnModuleDestro
 
     let detected;
     try {
-      detected = await this.engine.detectAnomalies({
-        dataset: {
-          dataSourceId: monitor.dataSourceId,
-          organizationId: monitor.organizationId,
-          table: monitor.tableName,
-        },
-        timeColumn: monitor.timeColumn,
-        valueColumn: monitor.valueColumn,
-        aggregation: monitor.aggregation,
-        filter: (monitor.filter as EngineFilter | null) ?? null,
-        method: 'auto',
-        metricName: monitor.name,
-        unit: monitor.unit,
-      });
+      detected = await this.detect(monitor);
     } catch (err) {
       const reason =
         err instanceof UpstreamError && err.unreachable

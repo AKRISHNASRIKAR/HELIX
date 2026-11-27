@@ -8,7 +8,7 @@ import {
 } from '@helix/database';
 import type { EngineFilter } from '../clients/analytics-engine.client';
 import { PrismaService } from '../prisma/prisma.service';
-import { MonitoringService, MonitorRunResult } from './monitoring.service';
+import { MonitoringService, MonitorRunResult, MonitorSeriesView } from './monitoring.service';
 import { MonitorSuggestion, SchemaColumn, suggestForTable } from './monitor-rules';
 
 export const AGGREGATIONS = ['sum', 'mean', 'count', 'count_distinct'] as const;
@@ -238,6 +238,16 @@ export class MonitorsService {
     });
     if (!monitor) throw new NotFoundException('Monitor not found');
     return this.monitoring.runMonitor(monitor);
+  }
+
+  /** The monitor's daily series and anomalies, read-only (no investigation, no lastRunAt). */
+  async series(organizationId: string, id: string): Promise<MonitorSeriesView> {
+    const monitor = await this.prisma.monitor.findFirst({
+      where: { id, organizationId },
+      include: { dataSource: true },
+    });
+    if (!monitor) throw new NotFoundException('Monitor not found');
+    return this.monitoring.series(monitor);
   }
 
   runAll(organizationId: string): Promise<MonitorRunResult[]> {

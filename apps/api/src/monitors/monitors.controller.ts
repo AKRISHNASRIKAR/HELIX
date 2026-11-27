@@ -7,7 +7,7 @@ import { ApiQueries, CurrentUser, MinRole, Tenant, ZodBody, ZodQuery } from '../
 import type { AuthUser, TenantContext } from '../common/types';
 import { UuidPipe } from '../common/uuid-param.pipe';
 import { TenantScoped } from '../tenant/tenant.guard';
-import type { MonitorRunResult } from './monitoring.service';
+import type { MonitorRunResult, MonitorSeriesView } from './monitoring.service';
 import type { MonitorSuggestion } from './monitor-rules';
 import { AGGREGATIONS, AnomalyView, MonitorView, MonitorsService } from './monitors.service';
 
@@ -92,6 +92,17 @@ export class MonitorsController {
   @ApiOperation({ summary: 'One monitor' })
   get(@Tenant() t: TenantContext, @Param('id', UuidPipe) id: string): Promise<MonitorView> {
     return this.monitors.get(t.organizationId, id);
+  }
+
+  @Get(':id/series')
+  @ApiOperation({
+    summary: "The monitor's daily series with every detected anomaly (read-only)",
+    description:
+      'Returns { series: [{ date, value }], anomalies, picked, seriesEnd, lookbackDays, minSeverity }. ' +
+      '`picked` is the anomaly a run would act on now. 503 when the analytics engine fails.',
+  })
+  series(@Tenant() t: TenantContext, @Param('id', UuidPipe) id: string): Promise<MonitorSeriesView> {
+    return this.monitors.series(t.organizationId, id);
   }
 
   @Patch(':id')

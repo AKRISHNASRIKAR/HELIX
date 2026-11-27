@@ -2119,6 +2119,45 @@
         ]
       }
     },
+    "/api/v1/monitors/{id}/series": {
+      "get": {
+        "description": "Returns { series: [{ date, value }], anomalies, picked, seriesEnd, lookbackDays, minSeverity }. `picked` is the anomaly a run would act on now. 503 when the analytics engine fails.",
+        "operationId": "MonitorsController_series",
+        "parameters": [
+          {
+            "name": "X-Organization-Id",
+            "in": "header",
+            "description": "Organization UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The monitor's daily series with every detected anomaly (read-only)",
+        "tags": [
+          "monitors"
+        ]
+      }
+    },
     "/api/v1/monitors/{id}/run": {
       "post": {
         "description": "Returns { monitorId, monitorName, status, message, investigationId?, anomaly? } where status is ok | investigation_opened | deduped | rate_limited | error.",
@@ -2192,6 +2231,126 @@
         "summary": "Recent anomalies in the organization, newest first",
         "tags": [
           "monitors"
+        ]
+      }
+    },
+    "/api/v1/analytics/overview": {
+      "get": {
+        "operationId": "AnalyticsController_overview",
+        "parameters": [
+          {
+            "name": "X-Organization-Id",
+            "in": "header",
+            "description": "Organization UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Headline KPIs (revenue, orders, AOV, refund rate), last 30 days vs prior 30",
+        "tags": [
+          "analytics"
+        ]
+      }
+    },
+    "/api/v1/analytics/revenue": {
+      "get": {
+        "operationId": "AnalyticsController_revenue",
+        "parameters": [
+          {
+            "name": "X-Organization-Id",
+            "in": "header",
+            "description": "Organization UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Daily revenue with the detector expected band, anomalies, forecast, segment split and drop story",
+        "tags": [
+          "analytics"
+        ]
+      }
+    },
+    "/api/v1/analytics/anomalies": {
+      "get": {
+        "operationId": "AnalyticsController_anomalies",
+        "parameters": [
+          {
+            "name": "X-Organization-Id",
+            "in": "header",
+            "description": "Organization UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Flagged anomalies across revenue, orders, refunds, customers, plus a |z| heatmap",
+        "tags": [
+          "analytics"
+        ]
+      }
+    },
+    "/api/v1/analytics/throughput": {
+      "get": {
+        "operationId": "AnalyticsController_throughput",
+        "parameters": [
+          {
+            "name": "X-Organization-Id",
+            "in": "header",
+            "description": "Organization UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Investigations created per day by trigger, last 14 days",
+        "tags": [
+          "analytics"
         ]
       }
     }
