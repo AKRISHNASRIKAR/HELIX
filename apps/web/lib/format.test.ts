@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatCell, formatDelta, formatNumber, formatPercent, formatRelative, formatUtcDay } from './format';
+import { formatCell, formatCurrency, formatDelta, formatNumber, formatPercent, formatRelative, formatUtcDay } from './format';
 
 describe('formatRelative', () => {
   const now = new Date('2026-10-14T12:00:00Z');
@@ -37,5 +37,27 @@ describe('formatUtcDay', () => {
     expect(formatUtcDay('2026-10-08T00:00:00.000Z')).toBe('Oct 8, 2026');
     expect(formatUtcDay(null)).toBe('unknown');
     expect(formatUtcDay('nope')).toBe('unknown');
+  });
+});
+
+describe('formatCurrency', () => {
+  it('formats compact amounts the same on server and browser', () => {
+    expect(formatCurrency(0)).toBe('$0');
+    expect(formatCurrency(12.34)).toBe('$12.3');
+    expect(formatCurrency(3000)).toBe('$3K');
+    expect(formatCurrency(3049)).toBe('$3K');
+    expect(formatCurrency(19944.04)).toBe('$19.9K');
+    expect(formatCurrency(884312)).toBe('$884.3K');
+    expect(formatCurrency(1_250_000)).toBe('$1.3M');
+    expect(formatCurrency(-12621.7)).toBe('-$12.6K');
+  });
+
+  it('promotes to the next unit instead of showing 1000K', () => {
+    expect(formatCurrency(999_960)).toBe('$1M');
+    expect(formatCurrency(999.96)).toBe('$1K');
+  });
+
+  it('keeps the standard form when not compact', () => {
+    expect(formatCurrency(12621.71, false)).toBe('$12,622');
   });
 });

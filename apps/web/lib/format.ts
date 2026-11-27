@@ -1,10 +1,27 @@
 export function formatCurrency(value: number, compact = true): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    notation: compact ? 'compact' : 'standard',
-    maximumFractionDigits: compact ? 1 : 0,
-  }).format(value);
+  if (!compact) {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
+  }
+  // Hand-rolled compact form: Intl's compact notation differs between Node and
+  // browser ICU versions ("$3K" vs "$3.0K"), which breaks hydration.
+  const abs = Math.abs(value);
+  const sign = value < 0 ? '-' : '';
+  const units: [number, string][] = [
+    [1, ''],
+    [1e3, 'K'],
+    [1e6, 'M'],
+    [1e9, 'B'],
+    [1e12, 'T'],
+  ];
+  let i = units.length - 1;
+  while (i > 0 && abs < units[i]![0]) i -= 1;
+  let n = Math.round((abs / units[i]![0]) * 10) / 10;
+  // 999.96K rounds to 1000K; show it as 1M instead.
+  if (n >= 1000 && i < units.length - 1) {
+    i += 1;
+    n = Math.round((abs / units[i]![0]) * 10) / 10;
+  }
+  return `${sign}$${Number.isInteger(n) ? n.toFixed(0) : n.toFixed(1)}${units[i]![1]}`;
 }
 
 export function formatPercent(value: number, digits = 1): string {

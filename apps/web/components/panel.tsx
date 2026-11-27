@@ -15,7 +15,7 @@ export function Panel({
 }) {
   return (
     <section
-      className={`rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)] ${className}`}
+      className={`rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow)] transition-colors duration-300 hover:border-[var(--border-strong)] ${className}`}
     >
       {title && (
         <header className="mb-4 flex items-start justify-between gap-4">

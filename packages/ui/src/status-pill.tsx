@@ -1,14 +1,14 @@
 import { InvestigationStatus } from '@helix/types';
 
 const STATUS_CLASSES: Record<InvestigationStatus, string> = {
-  [InvestigationStatus.PENDING]: 'bg-slate-100 text-slate-700',
-  [InvestigationStatus.PLANNING]: 'bg-blue-100 text-blue-700',
-  [InvestigationStatus.IN_PROGRESS]: 'bg-amber-100 text-amber-700',
-  [InvestigationStatus.AWAITING_EVIDENCE]: 'bg-amber-100 text-amber-700',
-  [InvestigationStatus.COMPLETED]: 'bg-green-100 text-green-700',
-  [InvestigationStatus.PARTIALLY_COMPLETED]: 'bg-yellow-100 text-yellow-700',
-  [InvestigationStatus.FAILED]: 'bg-red-100 text-red-700',
-  [InvestigationStatus.CANCELLED]: 'bg-slate-100 text-slate-500',
+  [InvestigationStatus.PENDING]: 'border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-secondary)]',
+  [InvestigationStatus.PLANNING]: 'helix-shimmer border border-[var(--border-strong)] bg-[var(--surface-raised)] text-[var(--text-primary)]',
+  [InvestigationStatus.IN_PROGRESS]: 'helix-shimmer border border-[var(--border-strong)] bg-[var(--surface-raised)] text-[var(--text-primary)]',
+  [InvestigationStatus.AWAITING_EVIDENCE]: 'helix-shimmer border border-[var(--border-strong)] bg-[var(--surface-raised)] text-[var(--text-primary)]',
+  [InvestigationStatus.COMPLETED]: 'bg-[var(--accent)] text-[var(--accent-contrast)]',
+  [InvestigationStatus.PARTIALLY_COMPLETED]: 'border border-[var(--status-warning)]/40 bg-transparent text-[var(--status-warning)]',
+  [InvestigationStatus.FAILED]: 'border border-[var(--status-critical)]/40 bg-[var(--anomaly-fill)] text-[var(--text-bad)]',
+  [InvestigationStatus.CANCELLED]: 'border border-[var(--border)] bg-transparent text-[var(--text-muted)]',
 };
 
 export interface StatusPillProps {
