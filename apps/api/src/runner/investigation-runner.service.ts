@@ -114,7 +114,13 @@ export class InvestigationRunnerService implements OnModuleDestroy {
         : r.status === 'PARTIALLY_COMPLETED'
           ? 'Investigation partially completed'
           : 'Investigation completed';
-      await this.notify(inv, failed ? 'failed' : 'completed', title, r.summary ?? inv.question);
+      await this.notify(
+        inv,
+        failed ? 'failed' : 'completed',
+        title,
+        r.summary ?? inv.question,
+        failed ? null : culpritLine(r),
+      );
     }
   }
 
@@ -390,10 +396,11 @@ export class InvestigationRunnerService implements OnModuleDestroy {
     outcome: 'completed' | 'failed',
     title: string,
     body: string,
+    suffix: string | null = null,
   ) {
     const notice = {
       organizationId: inv.organizationId,
-      body: body.length > 500 ? `${body.slice(0, 497)}...` : body,
+      body: notificationBody(body, suffix),
       link: `/investigations/${inv.id}`,
     };
     try {
@@ -415,4 +422,47 @@ export class InvestigationRunnerService implements OnModuleDestroy {
       this.logger.error(`Could not notify for ${inv.id}: ${(err as Error).message}`);
     }
   }
+}
+
+const NOTIFICATION_BODY_MAX = 500;
+
+/** The summary (shortened if needed) plus an optional line that is never cut off. */
+export function notificationBody(body: string, suffix: string | null = null): string {
+  const tail = suffix ? ` ${suffix}` : '';
+  const room = NOTIFICATION_BODY_MAX - tail.length;
+  let head = body;
+  if (body.length > room) {
+    // Cut at the last word boundary so the text never ends mid-word ("Custome...").
+    const cut = body.slice(0, Math.max(0, room - 3));
+    const space = cut.lastIndexOf(' ');
+    head = `${(space > cut.length * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.]+$/, '')}...`;
+  }
+  return `${head}${tail}`;
+}
+
+/**
+ * "Caused by carla.m (web-checkout v2.14.0). First step: Rollback is in place."
+ * from the root_cause_ranking evidence's culprit and fixPlan, or null.
+ */
+export function culpritLine(r: RunResult): string | null {
+  const ranking = r.evidence.find(
+    (e) => isRecord(e.data) && e.data.kind === 'root_cause_ranking' && isRecord(e.data.culprit),
+  );
+  if (!ranking || !isRecord(ranking.data)) return null;
+  const culprit = ranking.data.culprit as Record<string, unknown>;
+  const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  const change = [text(culprit.service), text(culprit.version)].filter(Boolean).join(' ');
+  const author = text(culprit.author);
+  let line = author
+    ? `Caused by ${author}${change ? ` (${change})` : ''}.`
+    : `Caused by the ${change || 'deploy'} change.`;
+  const plan = ranking.data.fixPlan;
+  const steps = isRecord(plan) && Array.isArray(plan.steps) ? plan.steps : [];
+  const first = steps.length && isRecord(steps[0]) ? text(steps[0].title) : null;
+  if (first) line += ` First step: ${first}.`;
+  return line;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
 }

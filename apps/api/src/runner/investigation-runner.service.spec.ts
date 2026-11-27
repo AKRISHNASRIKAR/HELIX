@@ -4,7 +4,11 @@ import { UpstreamError } from '../clients/http';
 import type { AgentRuntimeClient } from '../clients/agent-runtime.client';
 import type { NotificationsService } from '../notifications/notifications.service';
 import type { PrismaService } from '../prisma/prisma.service';
-import { InvestigationRunnerService } from './investigation-runner.service';
+import {
+  InvestigationRunnerService,
+  culpritLine,
+  notificationBody,
+} from './investigation-runner.service';
 
 const ORG = randomUUID();
 const DS = randomUUID();
@@ -245,6 +249,55 @@ describe('InvestigationRunnerService', () => {
         link: `/investigations/${inv.id}`,
       }),
     );
+  });
+
+  it('names the culprit and the first fix step in the completion notification', async () => {
+    const { runner, agentRuntime, notifications } = setup();
+    const result = runResult();
+    const taskId = result.tasks[0]!.id;
+    result.summary = 'S'.repeat(600);
+    result.evidence.push({
+      id: randomUUID(),
+      agentTaskId: taskId,
+      sourceType: 'METRIC',
+      source: { description: 'ranking' },
+      summary: 'Ranked 1 root-cause candidate(s)',
+      data: {
+        kind: 'root_cause_ranking',
+        culprit: { author: 'carla.m', service: 'web-checkout', version: 'v2.14.0' },
+        fixPlan: { state: 'rolled_back', steps: [{ kind: 'verify', title: 'Rollback is in place' }] },
+      } as never,
+      confidence: 0.95,
+      collectedAt: '2026-10-14T09:00:01Z',
+    });
+    agentRuntime.runInvestigation.mockResolvedValue(result);
+    await runner.run(inv.id);
+    const line = 'Caused by carla.m (web-checkout v2.14.0). First step: Rollback is in place.';
+    const body = notifications.create.mock.calls[0][0].body as string;
+    // The long summary is shortened so the culprit line is never cut off.
+    expect(body.endsWith(`... ${line}`)).toBe(true);
+    expect(body.length).toBe(500);
+    expect(notifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Investigation completed', type: 'investigation.completed' }),
+    );
+  });
+
+  it('builds the culprit line only from a ranking that has a culprit', () => {
+    const plain = runResult() as never;
+    expect(culpritLine(plain)).toBeNull();
+    const ranking = (culprit: Record<string, unknown>, fixPlan?: unknown) =>
+      ({
+        evidence: [{ data: { kind: 'root_cause_ranking', culprit, fixPlan } }],
+      }) as never;
+    expect(culpritLine(ranking({ author: null, service: 'web-checkout', version: 'v2.14.0' }))).toBe(
+      'Caused by the web-checkout v2.14.0 change.',
+    );
+    expect(culpritLine(ranking({ author: 'carla.m' }, { steps: [] }))).toBe('Caused by carla.m.');
+    expect(notificationBody('short')).toBe('short');
+    expect(notificationBody('short', 'Caused by x.')).toBe('short Caused by x.');
+    const long = notificationBody(`${'word '.repeat(120)}Customer segment mix`, 'Caused by carla.m.');
+    expect(long.length).toBeLessThanOrEqual(500);
+    expect(long).toMatch(/word\.\.\. Caused by carla\.m\.$/);
   });
 
   it('keeps CANCELLED when the user cancelled mid-run, but still stores the trail', async () => {
