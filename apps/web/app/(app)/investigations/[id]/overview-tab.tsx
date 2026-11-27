@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { TaskStatusPill } from '@helix/ui';
 import type {
+  EvidenceItem,
   InvestigationDetail,
   InvestigationEvent,
   InvestigationFinding,
@@ -18,20 +19,31 @@ import {
 import { formatPercent, formatRelative } from '../../../../lib/format';
 import {
   agentLabel,
+  buildRootCauseStory,
   contributingFindings,
+  metricSeriesById,
   plannerLabel,
+  readAnomaly,
   recommendationFindings,
   triggerContextRows,
+  type MetricSeries,
+  type SeriesPoint,
 } from '../../../../lib/trace';
 import { Panel } from '../../../../components/panel';
-import { ConfidenceBar, linkClass } from '../../../../components/ui';
+import { CueOnView, Reveal, Stagger } from '../../../../components/motion';
+import { linkClass } from '../../../../components/ui';
+import { StoryHero } from './result/story-hero';
+import { ConfidenceMeter, ConfidenceRing } from './result/charts';
+import { EvidenceVisual } from './result/evidence-visual';
 
 const PRIORITY_STYLE: Record<string, string> = {
-  CRITICAL: 'bg-[#fbe4e4] text-[var(--text-bad)]',
-  HIGH: 'bg-[#fdeee6] text-[#9a3f18]',
-  MEDIUM: 'bg-[var(--canvas)] text-[var(--text-secondary)]',
-  LOW: 'bg-[var(--canvas)] text-[var(--text-muted)]',
+  CRITICAL: 'bg-[var(--status-critical)] text-[var(--accent-contrast)] shadow-[0_0_14px_var(--anomaly-fill)]',
+  HIGH: 'bg-[var(--accent)] text-[var(--accent-contrast)]',
+  MEDIUM: 'border border-[var(--border-strong)] text-[var(--text-primary)]',
+  LOW: 'border border-[var(--border)] text-[var(--text-muted)]',
 };
+
+const AGENT_ORDER = ['ANALYTICS', 'FINANCE', 'CUSTOMER', 'PRODUCT', 'COORDINATOR'];
 
 export function OverviewTab({
   investigation,
@@ -55,68 +67,70 @@ export function OverviewTab({
   const monitor = investigation.monitor ?? trace?.investigation.monitor ?? null;
   const autonomous = String(investigation.triggerType) === 'ANOMALY_DETECTED';
   const meta = investigation.meta ?? trace?.meta ?? null;
+  const story = trace ? buildRootCauseStory(trace) : null;
+  const series = trace ? metricSeriesById(trace) : new Map<string, MetricSeries>();
+
+  // Findings grouped by agent, in plan order (Coordinator last).
+  const planOrder = new Map(steps.map((s) => [s.agentType, s.order]));
+  const rank = (a: string) => planOrder.get(a) ?? 100 + (AGENT_ORDER.indexOf(a) + 1 || 50);
+  const groups = [...new Set(findings.map((f) => f.agentType))]
+    .sort((a, b) => (a === 'COORDINATOR' ? 1 : b === 'COORDINATOR' ? -1 : rank(a) - rank(b)))
+    .map((agent) => ({
+      agent,
+      objective: steps.find((s) => s.agentType === agent)?.objective ?? null,
+      findings: findings
+        .filter((f) => f.agentType === agent)
+        .sort((a, b) => Number(b.isRootCause) - Number(a.isRootCause) || b.confidence - a.confidence),
+    }));
 
   return (
-    <div className="space-y-6">
-      {autonomous && (
-        <TriggerCard rows={triggerContextRows(triggerContext)} monitor={monitor} />
+    <div className="space-y-8">
+      {autonomous && <TriggerCard rows={triggerContextRows(triggerContext)} monitor={monitor} />}
+
+      {story ? (
+        <StoryHero story={story} contributors={contributors.length} />
+      ) : (
+        rootCause && (
+          <CueOnView cue="rootCause">
+            <section
+              aria-label="Root cause"
+              className="helix-beam flex flex-wrap items-center justify-between gap-6 rounded-3xl border border-[var(--border-strong)] bg-[var(--surface)] p-6 shadow-[var(--shadow-lg)]"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Root cause found</p>
+                <p className="mt-2 text-xl font-semibold leading-snug tracking-tight sm:text-2xl">{rootCause.statement}</p>
+                <p className="mt-2 text-xs text-[var(--text-secondary)]">
+                  {agentLabel(rootCause.agentType)} agent, {rootCause.analyticsType.toLowerCase()} analysis
+                </p>
+              </div>
+              <ConfidenceRing value={rootCause.confidence} />
+            </section>
+          </CueOnView>
+        )
       )}
 
-      {rootCause && (
-        <section
-          aria-label="Root cause"
-          className="rounded-xl border border-[var(--series-1)] bg-[#f3f8fe] p-5 ring-1 ring-[var(--series-1)]"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#1d5fae]">
-              Root cause
-              {rootCause.agentType === 'COORDINATOR' && (
-                <span className="ml-2 rounded bg-[#dceafb] px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal">
-                  Coordinator synthesis
-                </span>
-              )}
-            </p>
-            <ConfidenceBar value={rootCause.confidence} />
-          </div>
-          <p className="mt-2 text-base font-medium leading-snug">{rootCause.statement}</p>
-          <p className="mt-1 text-xs text-[var(--text-secondary)]">
-            {rootCause.agentType === 'COORDINATOR'
-              ? `ranked from ${contributors.length || 'the'} contributing finding${contributors.length === 1 ? '' : 's'}`
-              : `${rootCause.agentType.toLowerCase()} agent · ${rootCause.analyticsType.toLowerCase()} analysis`}
-          </p>
-          {contributors.length > 0 && (
-            <div className="mt-3 border-t border-[#cfe0f5] pt-3">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-[#1d5fae]">Contributing findings</p>
-              <ul className="mt-1.5 space-y-1.5">
-                {contributors.map((f) => (
-                  <li key={f.id} className="flex items-start gap-2 text-[13px]">
-                    <span className="mt-0.5 shrink-0 rounded bg-white px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
-                      {agentLabel(f.agentType)}
-                    </span>
-                    <span className="min-w-0 flex-1 text-[var(--text-secondary)]">{f.statement}</span>
-                    <span className="shrink-0 text-[11px] tabular-nums text-[var(--text-muted)]">
-                      {formatPercent(f.confidence, 0)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+      <Reveal>
+        <Panel title="Summary">
+          {investigation.summary ? (
+            <p className="whitespace-pre-line text-sm leading-relaxed text-[var(--text-secondary)]">{investigation.summary}</p>
+          ) : (
+            <p className="text-sm text-[var(--text-muted)]">{emptySummaryCopy(investigation.status)}</p>
           )}
-        </section>
-      )}
+        </Panel>
+      </Reveal>
 
-      <Panel title="Summary">
-        {investigation.summary ? (
-          <p className="whitespace-pre-line text-sm leading-relaxed text-[var(--text-secondary)]">{investigation.summary}</p>
-        ) : (
-          <p className="text-sm text-[var(--text-muted)]">{emptySummaryCopy(investigation.status)}</p>
-        )}
-      </Panel>
-
-      <section className="space-y-3" aria-labelledby="findings-heading">
-        <h2 id="findings-heading" className="text-sm font-semibold">
-          Findings {findings.length > 0 && <span className="font-normal text-[var(--text-muted)]">({findings.length})</span>}
-        </h2>
+      <section className="space-y-4" aria-labelledby="findings-heading">
+        <CueOnView cue="finding">
+          <SectionHeading
+            id="findings-heading"
+            title="What each agent found"
+            caption={
+              findings.length > 0
+                ? `${findings.length} finding${findings.length === 1 ? '' : 's'} from ${groups.length} agent${groups.length === 1 ? '' : 's'}, each backed by evidence`
+                : undefined
+            }
+          />
+        </CueOnView>
         {findings.length === 0 ? (
           <Panel>
             <p className="text-sm text-[var(--text-muted)]">
@@ -124,52 +138,85 @@ export function OverviewTab({
             </p>
           </Panel>
         ) : (
-          findings.map((f, i) => <FindingCard key={f.id ?? `${i}-${f.statement}`} finding={f} />)
+          groups.map((g, gi) => (
+            <div key={g.agent} className="space-y-3">
+              <Reveal className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="grid h-6 w-6 place-items-center rounded-full bg-[var(--accent)] text-[11px] font-semibold text-[var(--accent-contrast)]">
+                  {gi + 1}
+                </span>
+                <h3 className="text-sm font-semibold">
+                  {agentLabel(g.agent)} agent{' '}
+                  <span className="font-normal text-[var(--text-muted)]">
+                    {g.findings.length} finding{g.findings.length === 1 ? '' : 's'}
+                  </span>
+                </h3>
+                {g.objective && <p className="w-full text-xs text-[var(--text-muted)] sm:ml-9">{g.objective}</p>}
+              </Reveal>
+              <Stagger className="grid gap-3 lg:grid-cols-2" step={0.08}>
+                {g.findings.map((f, i) => (
+                  <FindingCard key={f.id ?? `${i}-${f.statement}`} finding={f} series={series} />
+                ))}
+              </Stagger>
+            </div>
+          ))
         )}
       </section>
 
       {recommendations.length > 0 && (
-        <Panel className="!p-0">
-          <h2 className="px-5 pb-1 pt-5 text-sm font-semibold">Recommendations</h2>
-          <ul className="divide-y divide-[var(--grid)]">
-            {recommendations.map((r, i) => {
-              const why = r.id ? (justifications.get(r.id) ?? []) : [];
-              return (
-                <li key={r.id ?? `${i}-${recommendationTitle(r)}`} className="flex items-start justify-between gap-4 px-5 py-4">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">{recommendationTitle(r)}</p>
-                    {r.description && <p className="mt-1 text-[13px] text-[var(--text-secondary)]">{r.description}</p>}
+        <section className="space-y-4" aria-labelledby="recs-heading">
+          <SectionHeading id="recs-heading" title="What to do next" caption={`${recommendations.length} action${recommendations.length === 1 ? '' : 's'}, most urgent first`} />
+          <Stagger className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" step={0.07}>
+            {[...recommendations]
+              .sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority))
+              .map((r, i) => {
+                const why = r.id ? (justifications.get(r.id) ?? []) : [];
+                return (
+                  <article
+                    key={r.id ?? `${i}-${recommendationTitle(r)}`}
+                    className={`flex h-full flex-col rounded-2xl border bg-[var(--surface)] p-4 shadow-[var(--shadow)] transition-[border-color,transform] duration-300 hover:-translate-y-0.5 hover:border-[var(--border-strong)] ${
+                      r.priority === 'CRITICAL' ? 'border-[var(--status-critical)]/50' : 'border-[var(--border)]'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-xs font-semibold tabular-nums">
+                        {i + 1}
+                      </span>
+                      <span
+                        className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${PRIORITY_STYLE[r.priority] ?? PRIORITY_STYLE.MEDIUM}`}
+                      >
+                        {r.priority.toLowerCase()}
+                      </span>
+                    </div>
+                    <h3 className="mt-3 text-sm font-semibold leading-snug">{recommendationTitle(r)}</h3>
+                    {r.description && <p className="mt-1.5 text-[13px] leading-relaxed text-[var(--text-secondary)]">{r.description}</p>}
                     {r.expectedImpact && (
-                      <p className="mt-1 text-xs text-[var(--text-muted)]">Expected impact: {r.expectedImpact}</p>
+                      <p className="mt-3 rounded-lg bg-[var(--surface-2)] px-2.5 py-1.5 text-xs text-[var(--text-secondary)]">
+                        <span className="font-semibold text-[var(--text-primary)]">Impact </span>
+                        {r.expectedImpact}
+                      </p>
                     )}
                     {why.length > 0 && (
-                      <div className="mt-2">
-                        <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Justified by</p>
+                      <div className="mt-auto pt-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Justified by</p>
                         <ul className="mt-1 space-y-1">
                           {why.map((f) => (
-                            <li key={f.id} className="border-l-2 border-[var(--border)] pl-2 text-xs text-[var(--text-secondary)]">
-                              <span className="font-medium">{agentLabel(f.agentType)}:</span> {f.statement}
+                            <li key={f.id} className="border-l-2 border-[var(--border-strong)] pl-2 text-xs text-[var(--text-secondary)]">
+                              <span className="font-medium text-[var(--text-primary)]">{agentLabel(f.agentType)}:</span> {f.statement}
                             </li>
                           ))}
                         </ul>
                       </div>
                     )}
-                  </div>
-                  <span
-                    className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${PRIORITY_STYLE[r.priority] ?? PRIORITY_STYLE.MEDIUM}`}
-                  >
-                    {r.priority.toLowerCase()}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </Panel>
+                  </article>
+                );
+              })}
+          </Stagger>
+        </section>
       )}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <Panel
-          title={meta?.planner ? `Plan · ${plannerLabel(meta)}` : 'Plan'}
+          title={meta?.planner ? `Plan, ${plannerLabel(meta)}` : 'Plan'}
           subtitle={investigation.plan?.reasoning ?? undefined}
           className="!pb-2"
         >
@@ -181,12 +228,12 @@ export function OverviewTab({
             <ol className="-mx-5 divide-y divide-[var(--grid)] border-t border-[var(--grid)]">
               {steps.map((step) => (
                 <li key={step.key} className="flex gap-3 px-5 py-3">
-                  <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--canvas)] text-xs font-medium text-[var(--text-secondary)]">
+                  <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--surface-2)] text-xs font-medium text-[var(--text-secondary)] ring-1 ring-[var(--border)]">
                     {step.order}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-medium">{step.agentType.toLowerCase()} agent</p>
+                      <p className="text-sm font-medium">{agentLabel(step.agentType)} agent</p>
                       {step.task && <TaskStatusPill status={step.task.status} />}
                       {step.task && formatDuration(step.task.startedAt, step.task.completedAt) && (
                         <span className="text-[11px] text-[var(--text-muted)]">
@@ -201,7 +248,7 @@ export function OverviewTab({
                       </p>
                     )}
                     {step.task?.error && (
-                      <p className="mt-1.5 rounded-md bg-[#fdf3f3] px-2 py-1 text-xs text-[var(--text-bad)]">{step.task.error}</p>
+                      <p className="mt-1.5 rounded-md bg-[var(--anomaly-fill)] px-2 py-1 text-xs text-[var(--text-bad)]">{step.task.error}</p>
                     )}
                   </div>
                 </li>
@@ -238,6 +285,21 @@ export function OverviewTab({
   );
 }
 
+function SectionHeading({ id, title, caption }: { id: string; title: string; caption?: string }) {
+  return (
+    <div>
+      <h2 id={id} className="text-lg font-semibold tracking-tight">
+        {title}
+      </h2>
+      {caption && <p className="mt-0.5 text-xs text-[var(--text-muted)]">{caption}</p>}
+    </div>
+  );
+}
+
+function priorityRank(p: string): number {
+  return ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].indexOf(p) + 1 || 9;
+}
+
 function TriggerCard({
   rows,
   monitor,
@@ -246,36 +308,44 @@ function TriggerCard({
   monitor: { id: string; name: string } | null;
 }) {
   return (
-    <section aria-label="Trigger" className="rounded-xl border border-[#f3d3c2] bg-[#fdf6f2] p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9a3f18]">Opened autonomously</p>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            {monitor ? (
-              <>
-                Monitor <span className="font-medium text-[var(--text-primary)]">{monitor.name}</span> detected an anomaly
-                and opened this investigation.
-              </>
-            ) : (
-              'A monitor detected an anomaly and opened this investigation.'
-            )}
-          </p>
+    <Reveal>
+      <section
+        aria-label="Trigger"
+        className="relative overflow-hidden rounded-2xl border border-[var(--status-critical)]/30 bg-[var(--surface)] p-5 shadow-[var(--shadow)]"
+      >
+        <div className="pointer-events-none absolute inset-0 bg-[var(--anomaly-fill)] opacity-60" aria-hidden />
+        <div className="relative flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-bad)]">Opened autonomously</p>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              {monitor ? (
+                <>
+                  Monitor <span className="font-medium text-[var(--text-primary)]">{monitor.name}</span> detected an anomaly
+                  and opened this investigation.
+                </>
+              ) : (
+                'A monitor detected an anomaly and opened this investigation.'
+              )}
+            </p>
+          </div>
+          <Link href="/monitoring" className={`text-xs font-medium ${linkClass}`}>
+            Monitoring →
+          </Link>
         </div>
-        <Link href="/monitoring" className={`text-xs font-medium ${linkClass}`}>
-          Monitoring →
-        </Link>
-      </div>
-      {rows.length > 0 && (
-        <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {rows.map((r) => (
-            <div key={r.label}>
-              <dt className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">{r.label}</dt>
-              <dd className="mt-0.5 break-words text-sm tabular-nums">{r.value}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
-    </section>
+        {rows.length > 0 && (
+          <dl className="relative mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+            {rows.map((r) => (
+              <div key={r.label}>
+                <dt className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">{r.label}</dt>
+                <dd className={`mt-0.5 break-words text-sm font-medium tabular-nums ${r.label === 'Change' ? 'text-[var(--text-bad)]' : ''}`}>
+                  {r.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </section>
+    </Reveal>
   );
 }
 
@@ -316,34 +386,55 @@ function eventDetail(e: InvestigationEvent): string | null {
   return null;
 }
 
-function FindingCard({ finding: f }: { finding: InvestigationFinding }) {
+/** The daily series an anomaly evidence row was detected in, when an agent recorded it. */
+function seriesFor(item: EvidenceItem, series: Map<string, MetricSeries>): SeriesPoint[] | null {
+  const a = readAnomaly(item.data);
+  return a?.metricId ? (series.get(a.metricId)?.series ?? null) : null;
+}
+
+function FindingCard({ finding: f, series }: { finding: InvestigationFinding; series: Map<string, MetricSeries> }) {
   const items = f.evidenceItems ?? [];
+  // The root cause card links every contributing item; show the first few and leave the rest in details.
+  const shown = f.isRootCause ? items.filter((i) => (i.data as { kind?: string } | null)?.kind === 'root_cause_ranking') : items.slice(0, 2);
   return (
-    <Panel className={f.isRootCause ? 'border-[var(--series-1)]' : undefined}>
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-            {f.agentType.toLowerCase()} agent · {f.analyticsType.toLowerCase()}
-            {f.isRootCause && (
-              <span className="ml-2 rounded bg-[var(--series-1)] px-1.5 py-0.5 text-[10px] text-white">ROOT CAUSE</span>
-            )}
-          </p>
-          <p className="mt-1 text-sm font-medium">{f.statement}</p>
-          {f.evidence.length > 0 && (
-            <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Evidence">
-              {f.evidence.map((e, i) => (
-                <li key={`${i}-${e}`} className="rounded-md bg-[var(--canvas)] px-2 py-0.5 text-xs text-[var(--text-secondary)]">
-                  {e}
-                </li>
-              ))}
-            </ul>
+    <article
+      className={`flex h-full flex-col rounded-2xl border bg-[var(--surface)] p-4 shadow-[var(--shadow)] transition-colors hover:border-[var(--border-strong)] ${
+        f.isRootCause ? 'border-[var(--accent)] shadow-[0_0_0_1px_var(--accent),0_0_32px_-8px_var(--glow-strong)]' : 'border-[var(--border)]'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <p className="flex flex-wrap items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+          {f.analyticsType.toLowerCase()}
+          {f.isRootCause && (
+            <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-[10px] tracking-wide text-[var(--accent-contrast)]">root cause</span>
           )}
-        </div>
-        <ConfidenceBar value={f.confidence} />
+        </p>
+        <ConfidenceMeter value={f.confidence} />
       </div>
+      <p className="mt-2 text-sm font-medium leading-snug">{f.statement}</p>
+
+      {shown.length > 0 && (
+        <ul className="mt-3 space-y-2" aria-label="Evidence">
+          {shown.map((item) => (
+            <li key={item.id} className="rounded-xl border border-[var(--grid)] bg-[var(--surface-2)] p-3">
+              <EvidenceVisual data={item.data} series={seriesFor(item, series)} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {shown.length === 0 && f.evidence.length > 0 && (
+        <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Evidence">
+          {f.evidence.map((e, i) => (
+            <li key={`${i}-${e}`} className="rounded-md bg-[var(--surface-2)] px-2 py-0.5 text-xs text-[var(--text-secondary)]">
+              {e}
+            </li>
+          ))}
+        </ul>
+      )}
+
       {items.length > 0 && (
-        <details className="group mt-3 border-t border-[var(--grid)] pt-3">
-          <summary className="cursor-pointer list-none rounded text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--series-1)] [&::-webkit-details-marker]:hidden">
+        <details className="group mt-auto pt-3">
+          <summary className="cursor-pointer list-none rounded text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] [&::-webkit-details-marker]:hidden">
             <span className="inline-block transition-transform group-open:rotate-90" aria-hidden>
               ▸
             </span>{' '}
@@ -353,7 +444,7 @@ function FindingCard({ finding: f }: { finding: InvestigationFinding }) {
             {items.map((item) => (
               <li key={item.id} className="rounded-lg border border-[var(--grid)] p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="rounded bg-[var(--canvas)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+                  <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
                     {item.sourceType.replace(/_/g, ' ').toLowerCase()}
                   </span>
                   {item.confidence != null && (
@@ -373,6 +464,6 @@ function FindingCard({ finding: f }: { finding: InvestigationFinding }) {
           </ul>
         </details>
       )}
-    </Panel>
+    </article>
   );
 }

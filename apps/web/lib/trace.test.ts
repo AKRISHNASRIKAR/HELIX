@@ -334,3 +334,188 @@ describe('describeSource', () => {
     expect(describeSource(null)).toBeNull();
   });
 });
+
+// ------------------------------------------- result screen view models
+
+import {
+  buildRootCauseStory,
+  buildSequence,
+  causalChain,
+  evidenceVisual,
+  isAlarmEvidence,
+  layoutCausalGraph,
+  metricSeriesById,
+  readRanking,
+  replayLanes,
+  snapshotBudget,
+} from './trace';
+
+describe('result screen view models', () => {
+  const anomalyData = {
+    kind: 'anomaly',
+    metricId: 'm-rev',
+    metricKey: 'revenue',
+    metricName: 'revenue',
+    unit: 'USD',
+    date: '2026-10-08',
+    value: 60,
+    expectedValue: 100,
+    deviationScore: -8,
+    severity: 'CRITICAL',
+    direction: 'drop',
+  };
+  const segmentData = {
+    kind: 'segment',
+    unit: 'USD',
+    date: '2026-10-08',
+    direction: 'drop',
+    metricName: 'revenue',
+    total: { actual: 60, expected: 100, delta: -40, deltaPercent: -40 },
+    topSlice: { column: 'channel', value: 'web', actual: 10, expected: 55, delta: -45, deltaPercent: -81.8, shareOfDelta: 1.125 },
+    dimensions: [
+      { column: 'segment', slices: [{ value: 'smb', actual: 30, expected: 50, delta: -20 }] },
+      {
+        column: 'channel',
+        slices: [
+          { value: 'web', actual: 10, expected: 55, delta: -45, deltaPercent: -81.8, shareOfDelta: 1.125 },
+          { value: 'mobile', actual: 50, expected: 45, delta: 5, deltaPercent: 11.1, shareOfDelta: -0.125 },
+        ],
+      },
+    ],
+  };
+  const eventData = {
+    kind: 'event_alignment',
+    date: '2026-10-08',
+    event: { time: '2026-10-08T08:40:00Z', labels: { service: 'web-checkout', version: 'v2.14.0', status: 'rolled_back' } },
+    hoursBefore: -8.67,
+    sameDay: true,
+    relevance: 1,
+  };
+  const neutralData = {
+    kind: 'segment_neutral',
+    direction: 'drop',
+    dimensions: [{ column: 'segment', slices: [{ value: 'enterprise', actual: 9, expected: 12, delta: -3, deltaPercent: -25 }] }],
+    maxGapPoints: 11.8,
+  };
+  const rankingData = {
+    kind: 'root_cause_ranking',
+    threshold: 0.75,
+    selectedCandidateId: 'c1',
+    candidates: [
+      { id: 'c2', score: 0.7, statement: 'other day' },
+      { id: 'c1', score: 0.95, statement: 'web broke', components: { event: 1, anomaly: 0.99 }, contributingEvidenceIds: ['e-seg'] },
+    ],
+  };
+
+  function storyFixture(): InvestigationTrace {
+    const t = fixture();
+    t.investigation.triggerContext = { date: '2026-10-08', metricKey: 'revenue' };
+    t.tasks[0]!.result = {
+      metrics: [
+        { id: 'm-rev', name: 'revenue (daily)', unit: 'USD', series: [{ timestamp: '2026-10-08T00:00:00Z', value: 60 }, { timestamp: '2026-10-07T00:00:00Z', value: 100 }, { timestamp: 'bad' }] },
+        { id: 'm-empty', series: [] },
+      ],
+    };
+    t.evidence = [
+      { id: 'e-a', agentTaskId: 't0', sourceType: 'ANOMALY', summary: 'drop', data: anomalyData, confidence: 0.99 },
+      { id: 'e-seg', agentTaskId: 't0', sourceType: 'METRIC', summary: 'web', data: segmentData, confidence: 0.99 },
+      { id: 'e-p', agentTaskId: 't2', sourceType: 'API_RESPONSE', summary: 'deploy', data: eventData, confidence: 1 },
+      { id: 'e-n', agentTaskId: 't1', sourceType: 'METRIC', summary: 'neutral', data: neutralData, confidence: 0.5 },
+      { id: 'e-r', agentTaskId: 't3', sourceType: 'METRIC', summary: 'ranking', data: rankingData, confidence: 0.95 },
+      { id: 'e-co', agentTaskId: 't1', sourceType: 'ANOMALY', summary: 'refunds', data: { ...anomalyData, kind: 'co_anomaly', metricId: 'm-ref', metricName: 'refunds', value: 37, expectedValue: 8, direction: 'spike' }, confidence: 0.99 },
+    ];
+    t.findings.find((f) => f.id === 'f-root')!.evidenceIds = ['e-a', 'e-p', 'e-r', 'e-co'];
+    return t;
+  }
+
+  it('reads metric series from task results, sorted, dropping bad points', () => {
+    const map = metricSeriesById(storyFixture());
+    expect(map.get('m-rev')?.series).toEqual([
+      { date: '2026-10-07', value: 100 },
+      { date: '2026-10-08', value: 60 },
+    ]);
+    expect(map.has('m-empty')).toBe(false);
+  });
+
+  it('builds the root cause story from linked and ranked evidence', () => {
+    const s = buildRootCauseStory(storyFixture())!;
+    expect(s.findingId).toBe('f-root');
+    expect(s.what?.changePercent).toBeCloseTo(-40);
+    expect(s.what?.series).toHaveLength(2);
+    // The segment comes in through the selected ranking candidate.
+    expect(s.where?.column).toBe('channel');
+    expect(s.where?.top?.value).toBe('web');
+    expect(s.why?.label).toBe('web-checkout v2.14.0');
+    expect(s.ruledOut[0]?.slices[0]?.value).toBe('enterprise');
+    expect(s.signals.map((x) => x.metricName)).toEqual(['refunds']);
+    expect(s.ranking?.candidates[0]).toMatchObject({ id: 'c1', selected: true });
+    expect(s.headline).toBe('Revenue fell 40.0% on Thu, Oct 8 because the web channel collapsed, right after the web-checkout v2.14.0 deploy.');
+  });
+
+  it('returns null without a root cause', () => {
+    const t = storyFixture();
+    t.findings = t.findings.filter((f) => !f.isRootCause);
+    t.investigation.rootCauseFindingId = null;
+    expect(buildRootCauseStory(t)).toBeNull();
+  });
+
+  it('picks a visual per evidence kind and flags only breakage as alarm', () => {
+    expect(evidenceVisual(anomalyData)?.kind).toBe('anomaly');
+    expect(evidenceVisual(segmentData)).toMatchObject({ kind: 'segment', neutral: false });
+    expect(evidenceVisual(neutralData)).toMatchObject({ kind: 'segment', neutral: true });
+    expect(evidenceVisual(eventData)?.kind).toBe('event');
+    expect(evidenceVisual({ kind: 'correlation', coefficient: 0.26 })?.kind).toBe('correlation');
+    expect(evidenceVisual({ kind: 'mystery' })).toBeNull();
+    expect(evidenceVisual('junk')).toBeNull();
+    expect(isAlarmEvidence(anomalyData)).toBe(true);
+    expect(isAlarmEvidence({ ...anomalyData, severity: 'HIGH' })).toBe(false);
+    expect(isAlarmEvidence(segmentData)).toBe(true);
+    expect(isAlarmEvidence(eventData)).toBe(false);
+    expect(readRanking(rankingData)?.candidates.map((c) => c.id)).toEqual(['c1', 'c2']);
+  });
+
+  it('places replay steps on agent lanes', () => {
+    const steps = buildReplaySteps(fixture());
+    const { lanes, markers } = replayLanes(steps);
+    expect(lanes.slice(0, 5)).toEqual(['COORDINATOR', 'ANALYTICS', 'FINANCE', 'CUSTOMER', 'PRODUCT']);
+    const wave2 = steps.findIndex((s) => s.id === 'wave-1');
+    expect(markers.filter((m) => m.step === wave2).map((m) => m.lane).sort()).toEqual(['COORDINATOR', 'FINANCE', 'PRODUCT']);
+    const root = steps.findIndex((s) => s.kind === 'rootCause');
+    expect(markers.find((m) => m.step === root)).toMatchObject({ lane: 'COORDINATOR', tone: 'root' });
+  });
+
+  it('builds the A2A sequence with offsets', () => {
+    const seq = buildSequence(fixture());
+    expect(seq.arrows[0]).toMatchObject({ id: 'm0', from: 'COORDINATOR', to: 'ANALYTICS', offsetMs: 0, transport: 'a2a-gateway' });
+    expect(seq.spanMs).toBe(10_000);
+    expect(seq.lanes).toEqual(['COORDINATOR', 'ANALYTICS', 'FINANCE', 'PRODUCT']);
+  });
+
+  it('reads the token budget from the budget decision', () => {
+    const trimmed = snapshotBudget({
+      tokenCount: 7974,
+      decisions: [{ rule: 'budget', kept: [], dropped: ['34 history findings'], reason: 'About 11259 tokens exceeded the 8000 token budget; trimmed to about 7938.' }],
+    });
+    expect(trimmed).toEqual({ budget: 8000, used: 7974, before: 11259, dropped: ['34 history findings'] });
+    const within = snapshotBudget({ tokenCount: 7887, decisions: [{ rule: 'budget', kept: [], dropped: [], reason: 'About 7862 tokens, within the 8000 token budget.' }] });
+    expect(within).toMatchObject({ budget: 8000, before: null });
+    expect(snapshotBudget({ tokenCount: null, decisions: [] })).toEqual({ budget: null, used: null, before: null, dropped: [] });
+  });
+
+  it('lays the graph out as a causal flow with steps folded into tasks', () => {
+    const layout = layoutCausalGraph(buildGraphData(storyFixture()));
+    expect(layout.nodes.some((n) => n.type === 'step')).toBe(false);
+    const q = layout.nodes.find((n) => n.type === 'question')!;
+    expect(layout.edges.some((e) => e.source === q.id && e.target === 'task:t0')).toBe(true);
+    expect(layout.rootId).toBe('finding:f-root');
+    expect(layout.nodes.find((n) => n.id === 'evidence:e-a')?.alarm).toBe(true);
+    expect(layout.nodes.find((n) => n.id === 'evidence:e-p')?.alarm).toBe(false);
+    expect(layout.edges.find((e) => e.source === 'evidence:e-a' && e.target === 'finding:f-root')?.toRoot).toBe(true);
+    expect(layout.edges.find((e) => e.target.startsWith('recommendation:'))?.toRoot).toBe(false);
+    expect(layout.nodes.map((n) => n.order)).toEqual(layout.nodes.map((_, i) => i));
+    expect(layout.nodes.find((n) => n.id === 'task:t0')?.agent).toBe('Analytics');
+    const chain = causalChain(layout.edges, 'evidence:e-a');
+    expect(chain.has('task:t0') && chain.has('finding:f-root') && chain.has(q.id)).toBe(true);
+    expect(chain.has('evidence:e-p')).toBe(false);
+  });
+});

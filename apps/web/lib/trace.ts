@@ -695,3 +695,759 @@ export function snapshotForTask(snapshots: TraceContextSnapshot[], task: TraceTa
     null
   );
 }
+
+// --------------------------------------------- result screen view models
+// Read by the Overview story hero, evidence cards, replay lanes, the causal
+// graph and the trace sequence diagram. All defensive: evidence `data` and
+// task `result` are free-form JSON.
+
+export interface SeriesPoint {
+  date: string;
+  value: number;
+}
+
+export interface MetricSeries {
+  id: string;
+  name: string;
+  unit: string | null;
+  series: SeriesPoint[];
+}
+
+/** Daily series every agent computed (`task.result.metrics[].series`), by metric id. */
+export function metricSeriesById(trace: Pick<InvestigationTrace, 'tasks'>): Map<string, MetricSeries> {
+  const out = new Map<string, MetricSeries>();
+  for (const t of trace.tasks ?? []) {
+    const r = isRecord(t.result) ? t.result : null;
+    const metrics = r && Array.isArray(r.metrics) ? r.metrics : [];
+    for (const m of metrics) {
+      if (!isRecord(m)) continue;
+      const id = asString(m.id);
+      if (!id) continue;
+      const series = (Array.isArray(m.series) ? m.series : [])
+        .filter(isRecord)
+        .map((p) => ({ date: (asString(p.timestamp) ?? asString(p.date) ?? '').slice(0, 10), value: asNumber(p.value) }))
+        .filter((p): p is SeriesPoint => !!p.date && p.value != null)
+        .sort((a, b) => a.date.localeCompare(b.date));
+      if (series.length > 0) out.set(id, { id, name: asString(m.name) ?? id, unit: asString(m.unit), series });
+    }
+  }
+  return out;
+}
+
+/** `data.kind` of an evidence row ("anomaly", "segment", ...). */
+export function evidenceKind(e: { data: unknown }): string | null {
+  return isRecord(e.data) ? asString(e.data.kind) : null;
+}
+
+export interface AnomalyView {
+  metricId: string | null;
+  metricKey: string | null;
+  metricName: string;
+  unit: string | null;
+  date: string;
+  value: number;
+  expected: number | null;
+  changePercent: number | null;
+  deviationScore: number | null;
+  severity: string | null;
+  direction: string | null;
+}
+
+export function readAnomaly(data: unknown): AnomalyView | null {
+  if (!isRecord(data)) return null;
+  const value = asNumber(data.value);
+  const date = (asString(data.date) ?? asString(data.timestamp) ?? '').slice(0, 10);
+  if (value == null || !date) return null;
+  const expected = asNumber(data.expectedValue);
+  return {
+    metricId: asString(data.metricId),
+    metricKey: asString(data.metricKey),
+    metricName: asString(data.metricName) ?? asString(data.metricKey) ?? 'metric',
+    unit: asString(data.unit),
+    date,
+    value,
+    expected,
+    changePercent: expected ? ((value - expected) / Math.abs(expected)) * 100 : null,
+    deviationScore: asNumber(data.deviationScore),
+    severity: asString(data.severity),
+    direction: asString(data.direction),
+  };
+}
+
+export interface SliceView {
+  value: string;
+  actual: number;
+  expected: number;
+  delta: number;
+  deltaPercent: number | null;
+  shareOfDelta: number | null;
+}
+
+export interface SegmentView {
+  column: string;
+  date: string | null;
+  metricName: string;
+  metricKey: string | null;
+  unit: string | null;
+  direction: string | null;
+  total: { actual: number; expected: number; delta: number; deltaPercent: number | null } | null;
+  slices: SliceView[];
+  top: SliceView | null;
+  maxGapPoints: number | null;
+}
+
+function readSlice(s: unknown): SliceView | null {
+  if (!isRecord(s)) return null;
+  const actual = asNumber(s.actual);
+  const expected = asNumber(s.expected);
+  if (actual == null || expected == null) return null;
+  return {
+    value: asString(s.value) ?? String(s.value ?? '?'),
+    actual,
+    expected,
+    delta: asNumber(s.delta) ?? actual - expected,
+    deltaPercent: asNumber(s.deltaPercent),
+    shareOfDelta: asNumber(s.shareOfDelta),
+  };
+}
+
+/** segment / segment_volume / segment_neutral evidence: the leading dimension and its slices. */
+export function readSegment(data: unknown): SegmentView | null {
+  if (!isRecord(data)) return null;
+  const dims = (Array.isArray(data.dimensions) ? data.dimensions : []).filter(isRecord);
+  const topRaw = isRecord(data.topSlice) ? data.topSlice : null;
+  const topColumn = topRaw ? asString(topRaw.column) : null;
+  const dim = dims.find((d) => topColumn && d.column === topColumn) ?? dims[0];
+  if (!dim) return null;
+  const slices = (Array.isArray(dim.slices) ? dim.slices : []).map(readSlice).filter((s): s is SliceView => !!s);
+  const totalRaw = isRecord(data.total) ? data.total : null;
+  const tActual = totalRaw ? asNumber(totalRaw.actual) : null;
+  const tExpected = totalRaw ? asNumber(totalRaw.expected) : null;
+  return {
+    column: asString(dim.column) ?? 'segment',
+    date: asString(data.date),
+    metricName: asString(data.metricName) ?? asString(data.metricKey) ?? 'metric',
+    metricKey: asString(data.metricKey),
+    unit: asString(data.unit),
+    direction: asString(data.direction),
+    total:
+      tActual != null && tExpected != null
+        ? {
+            actual: tActual,
+            expected: tExpected,
+            delta: asNumber(totalRaw!.delta) ?? tActual - tExpected,
+            deltaPercent: asNumber(totalRaw!.deltaPercent),
+          }
+        : null,
+    slices,
+    top: topRaw ? readSlice(topRaw) : null,
+    maxGapPoints: asNumber(data.maxGapPoints),
+  };
+}
+
+export interface EventView {
+  time: string;
+  date: string | null;
+  label: string;
+  service: string | null;
+  version: string | null;
+  status: string | null;
+  description: string | null;
+  author: string | null;
+  hoursBefore: number | null;
+  sameDay: boolean;
+  relevance: number | null;
+  keywords: string[];
+}
+
+/** event_alignment evidence: the deploy (or other event) next to the anomaly day. */
+export function readEvent(data: unknown): EventView | null {
+  if (!isRecord(data) || !isRecord(data.event)) return null;
+  const time = asString(data.event.time);
+  if (!time) return null;
+  const labels = isRecord(data.event.labels) ? data.event.labels : {};
+  const service = asString(labels.service);
+  const version = asString(labels.version);
+  return {
+    time,
+    date: asString(data.date),
+    label: [service, version].filter(Boolean).join(' ') || asString(labels.id) || 'event',
+    service,
+    version,
+    status: asString(labels.status),
+    description: asString(labels.description),
+    author: asString(labels.author),
+    hoursBefore: asNumber(data.hoursBefore),
+    sameDay: data.sameDay === true,
+    relevance: asNumber(data.relevance),
+    keywords: asStringList(data.keywordMatch),
+  };
+}
+
+export interface KpiView {
+  metricName: string;
+  unit: string | null;
+  value: number;
+  baseline: number | null;
+  changePercent: number | null;
+  pValue: number | null;
+}
+
+export function readKpi(data: unknown): KpiView | null {
+  if (!isRecord(data)) return null;
+  const value = asNumber(data.value);
+  if (value == null) return null;
+  return {
+    metricName: asString(data.metricName) ?? asString(data.metricKey) ?? 'metric',
+    unit: asString(data.unit),
+    value,
+    baseline: asNumber(data.baseline),
+    changePercent: asNumber(data.changePercent),
+    pValue: asNumber(data.pValue),
+  };
+}
+
+export interface ForecastView {
+  metricName: string;
+  unit: string | null;
+  method: string | null;
+  mape: number | null;
+  points: { date: string; value: number; lower: number | null; upper: number | null }[];
+}
+
+export function readForecast(data: unknown): ForecastView | null {
+  if (!isRecord(data) || !Array.isArray(data.forecast)) return null;
+  const points = data.forecast
+    .filter(isRecord)
+    .map((p) => ({
+      date: (asString(p.timestamp) ?? '').slice(0, 10),
+      value: asNumber(p.value),
+      lower: asNumber(p.lower),
+      upper: asNumber(p.upper),
+    }))
+    .filter((p): p is ForecastView['points'][number] => !!p.date && p.value != null);
+  if (points.length === 0) return null;
+  const backtest = isRecord(data.backtest) ? data.backtest : {};
+  return {
+    metricName: asString(data.metricName) ?? 'metric',
+    unit: asString(data.unit),
+    method: asString(data.methodUsed),
+    mape: asNumber(backtest.mape),
+    points,
+  };
+}
+
+export interface CorrelationView {
+  coefficient: number;
+  method: string | null;
+  metricName: string;
+  otherMetric: string;
+  pValue: number | null;
+  lag: number | null;
+  n: number | null;
+}
+
+export function readCorrelation(data: unknown): CorrelationView | null {
+  if (!isRecord(data)) return null;
+  const coefficient = asNumber(data.coefficient);
+  if (coefficient == null) return null;
+  return {
+    coefficient,
+    method: asString(data.method),
+    metricName: asString(data.metricName) ?? asString(data.metricKey) ?? 'metric',
+    otherMetric: asString(data.otherMetricKey) ?? 'other metric',
+    pValue: asNumber(data.pValue),
+    lag: asNumber(data.lag),
+    n: asNumber(data.n),
+  };
+}
+
+export interface RankingCandidate {
+  id: string;
+  score: number;
+  statement: string;
+  day: string | null;
+  selected: boolean;
+  components: { name: string; value: number }[];
+  evidenceIds: string[];
+}
+
+export interface RankingView {
+  method: string | null;
+  threshold: number | null;
+  candidates: RankingCandidate[];
+}
+
+export function readRanking(data: unknown): RankingView | null {
+  if (!isRecord(data) || !Array.isArray(data.candidates)) return null;
+  const selectedId = asString(data.selectedCandidateId);
+  const candidates = data.candidates
+    .filter(isRecord)
+    .map((c, i): RankingCandidate | null => {
+      const score = asNumber(c.score);
+      if (score == null) return null;
+      const id = asString(c.id) ?? `candidate-${i}`;
+      const formatted = isRecord(c.formatted) ? c.formatted : {};
+      const comps = isRecord(c.components) ? c.components : {};
+      return {
+        id,
+        score,
+        statement: asString(c.statement) ?? id,
+        day: asString(formatted.day),
+        selected: selectedId ? id === selectedId : i === 0,
+        components: Object.entries(comps)
+          .map(([name, v]) => ({ name, value: asNumber(v) ?? 0 }))
+          .sort((a, b) => b.value - a.value),
+        evidenceIds: asStringList(c.contributingEvidenceIds),
+      };
+    })
+    .filter((c): c is RankingCandidate => !!c)
+    .sort((a, b) => b.score - a.score);
+  return { method: asString(data.method), threshold: asNumber(data.threshold), candidates };
+}
+
+export type EvidenceVisual =
+  | { kind: 'anomaly'; anomaly: AnomalyView }
+  | { kind: 'segment'; segment: SegmentView; neutral: boolean }
+  | { kind: 'kpi'; kpi: KpiView }
+  | { kind: 'forecast'; forecast: ForecastView }
+  | { kind: 'event'; event: EventView }
+  | { kind: 'correlation'; correlation: CorrelationView }
+  | { kind: 'ranking'; ranking: RankingView };
+
+/** What a small chart for one evidence row should show, or null when there is nothing to plot. */
+export function evidenceVisual(data: unknown): EvidenceVisual | null {
+  const kind = isRecord(data) ? asString(data.kind) : null;
+  switch (kind) {
+    case 'anomaly':
+    case 'co_anomaly': {
+      const a = readAnomaly(data);
+      return a ? { kind: 'anomaly', anomaly: a } : null;
+    }
+    case 'segment':
+    case 'segment_volume':
+    case 'segment_neutral': {
+      const s = readSegment(data);
+      return s && s.slices.length > 0 ? { kind: 'segment', segment: s, neutral: kind === 'segment_neutral' } : null;
+    }
+    case 'kpi': {
+      const k = readKpi(data);
+      return k ? { kind: 'kpi', kpi: k } : null;
+    }
+    case 'forecast': {
+      const f = readForecast(data);
+      return f ? { kind: 'forecast', forecast: f } : null;
+    }
+    case 'event_alignment': {
+      const e = readEvent(data);
+      return e ? { kind: 'event', event: e } : null;
+    }
+    case 'correlation': {
+      const c = readCorrelation(data);
+      return c ? { kind: 'correlation', correlation: c } : null;
+    }
+    case 'root_cause_ranking': {
+      const r = readRanking(data);
+      return r && r.candidates.length > 0 ? { kind: 'ranking', ranking: r } : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** True for evidence that shows something broke (critical anomaly or a segment drop). */
+export function isAlarmEvidence(data: unknown): boolean {
+  if (!isRecord(data)) return false;
+  const kind = asString(data.kind);
+  if (kind === 'anomaly' || kind === 'co_anomaly') return asString(data.severity) === 'CRITICAL';
+  if (kind === 'segment' || kind === 'segment_volume') return asString(data.direction) === 'drop' && isRecord(data.topSlice);
+  return false;
+}
+
+export interface RootCauseStory {
+  findingId: string;
+  statement: string;
+  headline: string;
+  confidence: number | null;
+  agentType: string;
+  what: (AnomalyView & { series: SeriesPoint[]; otherAnomalies: AnomalyView[] }) | null;
+  where: SegmentView | null;
+  volume: SegmentView | null;
+  why: EventView | null;
+  otherEvents: EventView[];
+  ruledOut: SegmentView[];
+  signals: AnomalyView[];
+  ranking: RankingView | null;
+}
+
+const WEEKDAY_DAY = (iso: string): string => {
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+};
+
+const humanMetric = (s: string) => s.replace(/\s*\(daily\)\s*$/i, '').replace(/_/g, ' ');
+
+/**
+ * The root cause as a story: what dropped (the anomaly and its daily series),
+ * where (the segment that carries the drop), why (the aligned deploy), what
+ * was ruled out and which other signals moved with it. Only uses the evidence
+ * linked to the root cause (or its selected ranking candidate); null when
+ * there is no root cause.
+ */
+export function buildRootCauseStory(trace: InvestigationTrace): RootCauseStory | null {
+  const root = rootCauseFinding(trace);
+  if (!root) return null;
+  const all = trace.evidence ?? [];
+  const rankingEv = all.find((e) => (root.evidenceIds ?? []).includes(e.id) && evidenceKind(e) === 'root_cause_ranking')
+    ?? all.find((e) => evidenceKind(e) === 'root_cause_ranking');
+  const ranking = rankingEv ? readRanking(rankingEv.data) : null;
+  const selected = ranking?.candidates.find((c) => c.selected) ?? null;
+  const poolIds = new Set([...(root.evidenceIds ?? []), ...(selected?.evidenceIds ?? [])]);
+  const pool = all.filter((e) => poolIds.has(e.id));
+  const of = (kinds: string[]) => pool.filter((e) => kinds.includes(evidenceKind(e) ?? ''));
+
+  const trig = trace.investigation.triggerContext;
+  const anomalies = of(['anomaly']).map((e) => readAnomaly(e.data)).filter((a): a is AnomalyView => !!a);
+  const main =
+    anomalies.find((a) => trig?.date && a.date === trig.date && (!trig.metricKey || a.metricKey === trig.metricKey)) ??
+    [...anomalies].sort((a, b) => Math.abs(b.deviationScore ?? 0) - Math.abs(a.deviationScore ?? 0))[0] ??
+    null;
+  const seriesMap = metricSeriesById(trace);
+  let what = main
+    ? {
+        ...main,
+        series: (main.metricId ? seriesMap.get(main.metricId)?.series : undefined) ?? [],
+        otherAnomalies: all
+          .filter((e) => evidenceKind(e) === 'anomaly')
+          .map((e) => readAnomaly(e.data))
+          .filter((a): a is AnomalyView => !!a && a.metricId === main.metricId && a.date !== main.date),
+      }
+    : null;
+
+  const where = of(['segment']).map((e) => readSegment(e.data)).find((s) => s?.top) ?? null;
+  // The root cause statement quotes the segment comparison's total (same
+  // weekday baseline), while the anomaly detector has its own expected value.
+  // Use the statement's numbers so the headline never contradicts the text.
+  if (what && where?.total && where.date?.slice(0, 10) === what.date) {
+    const t = where.total;
+    what = {
+      ...what,
+      value: t.actual,
+      expected: t.expected,
+      changePercent: t.deltaPercent ?? (t.expected ? ((t.actual - t.expected) / Math.abs(t.expected)) * 100 : what.changePercent),
+    };
+  }
+  const volume = of(['segment_volume']).map((e) => readSegment(e.data)).find((s) => s?.top) ?? null;
+  const events = of(['event_alignment'])
+    .map((e) => readEvent(e.data))
+    .filter((e): e is EventView => !!e)
+    .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0));
+  const why = events[0] ?? null;
+  const otherEvents = all
+    .filter((e) => evidenceKind(e) === 'event_alignment')
+    .map((e) => readEvent(e.data))
+    .filter((e): e is EventView => !!e && !(why && e.time === why.time && e.label === why.label));
+  const ruledOut = all
+    .filter((e) => evidenceKind(e) === 'segment_neutral')
+    .map((e) => readSegment(e.data))
+    .filter((s): s is SegmentView => !!s);
+  const signals = of(['co_anomaly']).map((e) => readAnomaly(e.data)).filter((a): a is AnomalyView => !!a);
+
+  let headline = root.statement;
+  if (what) {
+    const pct = what.changePercent != null ? ` ${Math.abs(what.changePercent).toFixed(1)}%` : '';
+    const verb = what.direction === 'spike' || (what.changePercent ?? 0) > 0 ? 'jumped' : 'fell';
+    const name = humanMetric(what.metricName);
+    headline = `${name.charAt(0).toUpperCase()}${name.slice(1)} ${verb}${pct} on ${WEEKDAY_DAY(what.date)}`;
+    const top = where?.top ?? volume?.top;
+    const col = where?.column ?? volume?.column;
+    if (top && col) headline += ` because the ${top.value} ${col} ${(top.deltaPercent ?? top.delta) < 0 ? 'collapsed' : 'surged'}`;
+    if (why) headline += `${top ? ',' : ''} right after the ${why.label} ${why.service || why.version ? 'deploy' : 'event'}`;
+    headline += '.';
+  }
+
+  return {
+    findingId: root.id,
+    statement: root.statement,
+    headline,
+    confidence: root.confidence ?? trace.investigation.overallConfidence ?? null,
+    agentType: root.agentType,
+    what,
+    where,
+    volume,
+    why,
+    otherEvents,
+    ruledOut,
+    signals,
+    ranking,
+  };
+}
+
+// ------------------------------------------------------- replay swimlanes
+
+export const AGENT_LANES = ['COORDINATOR', 'ANALYTICS', 'FINANCE', 'CUSTOMER', 'PRODUCT'] as const;
+
+export type ReplayMarkerTone = 'info' | 'start' | 'done' | 'fail' | 'root';
+
+export interface ReplayMarker {
+  step: number;
+  lane: string;
+  tone: ReplayMarkerTone;
+  count: number;
+}
+
+/** Places each replay step on an agent lane (dispatch steps also mark every agent they start). */
+export function replayLanes(steps: ReplayStep[]): { lanes: string[]; markers: ReplayMarker[] } {
+  const markers: ReplayMarker[] = [];
+  steps.forEach((s, i) => {
+    if (s.kind === 'dispatch') {
+      markers.push({ step: i, lane: 'COORDINATOR', tone: 'info', count: 0 });
+      const targets = new Set(s.messages.map((m) => m.to.toUpperCase()));
+      for (const t of targets) if (t !== 'COORDINATOR') markers.push({ step: i, lane: t, tone: 'start', count: 0 });
+    } else if (s.kind === 'result') {
+      const lane = (s.agentType ?? 'COORDINATOR').toUpperCase();
+      const failed = /FAIL|ERROR|CANCEL/.test(s.status ?? '');
+      markers.push({ step: i, lane, tone: failed ? 'fail' : 'done', count: s.items.length });
+    } else if (s.kind === 'rootCause') {
+      markers.push({ step: i, lane: 'COORDINATOR', tone: 'root', count: 0 });
+    } else {
+      markers.push({ step: i, lane: 'COORDINATOR', tone: 'info', count: s.kind === 'findings' ? s.items.length : 0 });
+    }
+  });
+  const lanes: string[] = [...AGENT_LANES];
+  for (const m of markers) if (!lanes.includes(m.lane)) lanes.push(m.lane);
+  return { lanes, markers };
+}
+
+// ------------------------------------------------- A2A sequence diagram
+
+export interface SequenceArrow extends ReplayMessage {
+  taskId: string | null;
+  offsetMs: number;
+}
+
+/** A2A messages in time order with their offset from the first one, plus the lanes they touch. */
+export function buildSequence(trace: Pick<InvestigationTrace, 'messages'>): {
+  lanes: string[];
+  arrows: SequenceArrow[];
+  spanMs: number;
+} {
+  const sorted = [...(trace.messages ?? [])].sort((a, b) => time(a.createdAt) - time(b.createdAt));
+  const t0 = sorted.length ? time(sorted[0]!.createdAt) : 0;
+  const arrows = sorted.map((m) => ({
+    ...toReplayMessage(m),
+    from: m.fromAgent.toUpperCase(),
+    to: m.toAgent.toUpperCase(),
+    taskId: m.agentTaskId ?? m.correlationId,
+    offsetMs: Number.isFinite(time(m.createdAt)) ? Math.max(0, time(m.createdAt) - t0) : 0,
+  }));
+  const touched = new Set(arrows.flatMap((a) => [a.from, a.to]));
+  const lanes = [...AGENT_LANES.filter((l) => touched.has(l)), ...[...touched].filter((l) => !(AGENT_LANES as readonly string[]).includes(l))];
+  return { lanes, arrows, spanMs: arrows.length ? arrows[arrows.length - 1]!.offsetMs : 0 };
+}
+
+// --------------------------------------------------------- token budget
+
+export interface SnapshotBudget {
+  budget: number | null;
+  used: number | null;
+  before: number | null;
+  dropped: string[];
+}
+
+/** Token budget, tokens used and what was trimmed, read from the context engine's "budget" decision. */
+export function snapshotBudget(view: Pick<SnapshotView, 'decisions' | 'tokenCount'>): SnapshotBudget {
+  const d = view.decisions.find((x) => x.rule === 'budget');
+  const num = (re: RegExp) => {
+    const m = d?.reason.match(re);
+    return m ? Number(m[1]) : null;
+  };
+  return {
+    budget: num(/(\d+) token budget/),
+    used: view.tokenCount,
+    before: d && /exceeded/.test(d.reason) ? num(/About (\d+) tokens/) : null,
+    dropped: d?.dropped ?? [],
+  };
+}
+
+// ------------------------------------------------------ causal graph
+
+export interface CausalNode {
+  id: string;
+  type: TraceGraphNodeType;
+  column: number;
+  row: number;
+  x: number;
+  y: number;
+  label: string;
+  agent: string | null;
+  alarm: boolean;
+  order: number;
+  datum: GraphNodeDatum;
+}
+
+export interface CausalEdge {
+  id: string;
+  source: string;
+  target: string;
+  kind: TraceGraphEdge['kind'];
+  toRoot: boolean;
+}
+
+export interface CausalLayout {
+  nodes: CausalNode[];
+  edges: CausalEdge[];
+  columns: { label: string; x: number }[];
+  width: number;
+  height: number;
+  rootId: string | null;
+}
+
+export const CAUSAL_COLUMNS = ['Question', 'Agents', 'Evidence', 'Findings', 'Root cause', 'Actions'] as const;
+const CAUSAL_COLUMN: Record<TraceGraphNodeType, number> = {
+  question: 0,
+  step: 1,
+  task: 1,
+  evidence: 2,
+  finding: 3,
+  rootCause: 4,
+  recommendation: 5,
+};
+
+/** "Agent task, Analytics agent" -> "Analytics". */
+export function nodeAgent(n: Pick<GraphNodeDatum, 'detail'>): string | null {
+  const m = n.detail.subtitle.match(/,\s*([^,]+?) agent$/);
+  return m ? m[1]! : null;
+}
+
+/**
+ * Lays the evidence graph out as a left-to-right causal flow: question,
+ * agents (plan steps folded into the task they ran), evidence, findings, root
+ * cause, actions. Rows are ordered to follow their parents so edges cross
+ * less; `order` is the reveal order; `toRoot` marks edges on a path into the
+ * root cause.
+ */
+export function layoutCausalGraph(data: GraphData, opts: { width?: number; rowGap?: number } = {}): CausalLayout {
+  const width = opts.width ?? 1200;
+  const rowGap = opts.rowGap ?? 34;
+  const byId = new Map(data.nodes.map((n) => [n.id, n]));
+  // Fold steps into the task(s) they ran.
+  const stepToTasks = new Map<string, string[]>();
+  for (const l of data.links) {
+    if (l.kind === 'runs' && byId.get(l.source)?.type === 'step' && byId.get(l.target)?.type === 'task') {
+      stepToTasks.set(l.source, [...(stepToTasks.get(l.source) ?? []), l.target]);
+    }
+  }
+  const kept = data.nodes.filter((n) => !(n.type === 'step' && stepToTasks.has(n.id)));
+  const keptIds = new Set(kept.map((n) => n.id));
+  const edgeMap = new Map<string, CausalEdge>();
+  for (const l of data.links) {
+    if (l.kind === 'runs' && stepToTasks.has(l.source)) continue;
+    const sources = stepToTasks.get(l.source) ?? [l.source];
+    const targets = stepToTasks.get(l.target) ?? [l.target];
+    for (const s of sources)
+      for (const t of targets) {
+        if (s === t || !keptIds.has(s) || !keptIds.has(t)) continue;
+        const id = `${s}->${t}`;
+        if (!edgeMap.has(id)) edgeMap.set(id, { id, source: s, target: t, kind: l.kind, toRoot: false });
+      }
+  }
+  const edges = [...edgeMap.values()];
+  const parents = new Map<string, string[]>();
+  for (const e of edges) parents.set(e.target, [...(parents.get(e.target) ?? []), e.source]);
+
+  const cols: GraphNodeDatum[][] = CAUSAL_COLUMNS.map(() => []);
+  for (const n of kept) cols[CAUSAL_COLUMN[n.type]]!.push(n);
+  const rowOf = new Map<string, number>();
+  cols.forEach((list, c) => {
+    const original = new Map(list.map((n, i) => [n.id, i]));
+    if (c >= 2) {
+      const score = (n: GraphNodeDatum) => {
+        const ps = (parents.get(n.id) ?? []).map((p) => rowOf.get(p)).filter((r): r is number => r != null);
+        return ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : Number.POSITIVE_INFINITY;
+      };
+      list.sort((a, b) => score(a) - score(b) || original.get(a.id)! - original.get(b.id)!);
+    }
+    list.forEach((n, i) => rowOf.set(n.id, list.length > 1 ? i / (list.length - 1) : 0.5));
+  });
+
+  const maxRows = Math.max(1, ...cols.map((c) => c.length));
+  const pad = 40;
+  const height = Math.max(360, maxRows * rowGap + pad * 2);
+  const colX = (c: number) => 70 + (c * (width - 140)) / (CAUSAL_COLUMNS.length - 1);
+
+  const alarmIds = new Set<string>();
+  for (const n of kept) if (n.type === 'evidence' && isAlarmEvidence(n.detail.data)) alarmIds.add(n.id);
+  for (const n of kept) {
+    if (n.type !== 'finding') continue;
+    const ps = (parents.get(n.id) ?? []).filter((p) => byId.get(p)?.type === 'evidence');
+    if (ps.length > 0 && ps.every((p) => alarmIds.has(p))) alarmIds.add(n.id);
+  }
+
+  let order = 0;
+  const nodes: CausalNode[] = [];
+  cols.forEach((list, c) => {
+    const span = height - pad * 2;
+    list.forEach((n, i) => {
+      nodes.push({
+        id: n.id,
+        type: n.type,
+        column: c,
+        row: i,
+        x: colX(c),
+        y: list.length === 1 ? height / 2 : pad + (i + 0.5) * (span / list.length),
+        label: n.name,
+        agent: nodeAgent(n),
+        alarm: alarmIds.has(n.id),
+        order: order++,
+        datum: n,
+      });
+    });
+  });
+
+  const rootId = nodes.find((n) => n.type === 'rootCause')?.id ?? null;
+  if (rootId) {
+    const anc = new Set([rootId]);
+    const queue = [rootId];
+    while (queue.length) {
+      const cur = queue.shift()!;
+      for (const p of parents.get(cur) ?? []) {
+        if (anc.has(p)) continue;
+        anc.add(p);
+        queue.push(p);
+      }
+    }
+    for (const e of edges) e.toRoot = anc.has(e.source) && anc.has(e.target);
+  }
+  return {
+    nodes,
+    edges,
+    columns: CAUSAL_COLUMNS.map((label, c) => ({ label, x: colX(c) })),
+    width,
+    height,
+    rootId,
+  };
+}
+
+/** Every node upstream and downstream of `id` (inclusive), for hover highlighting. */
+export function causalChain(edges: Pick<CausalEdge, 'source' | 'target'>[], id: string): Set<string> {
+  const out = new Set([id]);
+  const walk = (dir: 'up' | 'down') => {
+    const queue = [id];
+    while (queue.length) {
+      const cur = queue.shift()!;
+      for (const e of edges) {
+        const next = dir === 'up' ? (e.target === cur ? e.source : null) : e.source === cur ? e.target : null;
+        if (next && !out.has(next)) {
+          out.add(next);
+          queue.push(next);
+        }
+      }
+    }
+  };
+  walk('up');
+  walk('down');
+  return out;
+}
