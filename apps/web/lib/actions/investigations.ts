@@ -18,7 +18,7 @@ export async function createInvestigationAction(_prev: FormState, formData: Form
   });
   if (!res.ok) return { error: res.error, values };
   revalidatePath('/investigations');
-  redirect(`/investigations/${res.data.id}`);
+  redirect(`/investigations/${res.data.id}?play=1`);
 }
 
 export async function cancelInvestigationAction(_prev: FormState, formData: FormData): Promise<FormState> {
