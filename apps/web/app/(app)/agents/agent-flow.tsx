@@ -22,17 +22,17 @@ export interface FlowAgent {
 type NodeId = 'plan' | 'ANALYTICS' | 'FINANCE' | 'CUSTOMER' | 'PRODUCT' | 'synth';
 
 const W = 1000;
-const H = 330;
-const NODE_W = 184;
-const NODE_H = 66;
+const H = 340;
+const NODE_W = 200;
+const NODE_H = 70;
 
 const NODES: { id: NodeId; type: string; x: number; y: number; role: string; phase: number }[] = [
-  { id: 'plan', type: 'COORDINATOR', x: 110, y: 165, role: 'Plans the investigation', phase: 0 },
-  { id: 'ANALYTICS', type: 'ANALYTICS', x: 370, y: 165, role: 'Finds what moved', phase: 1 },
-  { id: 'FINANCE', type: 'FINANCE', x: 640, y: 55, role: 'Refunds and payments', phase: 2 },
-  { id: 'CUSTOMER', type: 'CUSTOMER', x: 640, y: 165, role: 'Customers and segments', phase: 2 },
-  { id: 'PRODUCT', type: 'PRODUCT', x: 640, y: 275, role: 'Deploys and releases', phase: 2 },
-  { id: 'synth', type: 'COORDINATOR', x: 890, y: 165, role: 'Names the root cause', phase: 3 },
+  { id: 'plan', type: 'COORDINATOR', x: 104, y: 170, role: 'Plans the work', phase: 0 },
+  { id: 'ANALYTICS', type: 'ANALYTICS', x: 366, y: 170, role: 'Finds what moved', phase: 1 },
+  { id: 'FINANCE', type: 'FINANCE', x: 634, y: 55, role: 'Revenue, refunds', phase: 2 },
+  { id: 'CUSTOMER', type: 'CUSTOMER', x: 634, y: 170, role: 'Customer segments', phase: 2 },
+  { id: 'PRODUCT', type: 'PRODUCT', x: 634, y: 285, role: 'Deploys, releases', phase: 2 },
+  { id: 'synth', type: 'COORDINATOR', x: 896, y: 170, role: 'Names the cause', phase: 3 },
 ];
 
 const EDGES: { from: NodeId; to: NodeId; phase: number }[] = [
@@ -202,6 +202,8 @@ export function AgentFlow({ agents }: { agents: FlowAgent[] }) {
                   />
                 )}
                 <motion.g
+                  // Scale around the node's own centre, not the SVG origin.
+                  style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
                   animate={{ scale: active ? 1.04 : 1 }}
                   transition={{ type: 'spring', stiffness: 300, damping: 20 }}
                 >
@@ -216,8 +218,8 @@ export function AgentFlow({ agents }: { agents: FlowAgent[] }) {
                     strokeWidth={active ? 1.8 : 1.2}
                     style={{ transition: 'stroke 0.3s, fill 0.3s' }}
                   />
-                  <circle cx={x + 33} cy={n.y} r={19} fill={active || done ? 'var(--accent)' : 'var(--surface-2)'} style={{ transition: 'fill 0.3s' }} />
-                  <g transform={`translate(${x + 21} ${n.y - 12})`}>
+                  <circle cx={x + 32} cy={n.y} r={18} fill={active || done ? 'var(--accent)' : 'var(--surface-2)'} style={{ transition: 'fill 0.3s' }} />
+                  <g transform={`translate(${x + 20} ${n.y - 12})`}>
                     <path
                       d={agentGlyph(n.type)}
                       fill="none"
@@ -227,10 +229,10 @@ export function AgentFlow({ agents }: { agents: FlowAgent[] }) {
                       strokeLinejoin="round"
                     />
                   </g>
-                  <text x={x + 62} y={n.y - 5} fontSize={16} fontWeight={600} fill="var(--text-primary)">
+                  <text x={x + 60} y={n.y - 5} fontSize={16} fontWeight={600} fill="var(--text-primary)" fontFamily="var(--font-inter), sans-serif">
                     {label}
                   </text>
-                  <text x={x + 62} y={n.y + 15} fontSize={12} fill="var(--text-muted)">
+                  <text x={x + 60} y={n.y + 15} fontSize={12} fill="var(--text-secondary)" fontFamily="var(--font-inter), sans-serif">
                     {n.role}
                   </text>
                   {down && <circle cx={x + NODE_W - 14} cy={y + 14} r={4} fill="var(--status-critical)" />}
@@ -250,7 +252,7 @@ export function AgentFlow({ agents }: { agents: FlowAgent[] }) {
               className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 transition-all duration-300 ${
                 on
                   ? 'border-[var(--border-strong)] bg-[var(--surface-2)] text-[var(--text-primary)]'
-                  : 'border-transparent text-[var(--text-muted)]'
+                  : 'border-[var(--border)] text-[var(--text-secondary)]'
               }`}
             >
               <span

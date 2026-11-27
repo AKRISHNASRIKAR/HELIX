@@ -30,7 +30,9 @@ let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let unlocked = false;
 
-const MASTER_VOLUME = 0.32;
+const MASTER_VOLUME = 1;
+/** Per-cue levels below are relative; this lifts them all to a clearly audible level on laptop speakers. */
+const CUE_BOOST = 2.6;
 
 function audio(): AudioContext | null {
   if (typeof window === 'undefined') return null;
@@ -42,10 +44,16 @@ function audio(): AudioContext | null {
       master = ctx.createGain();
       master.gain.value = MASTER_VOLUME;
       // Gentle compression keeps stacked cues from clipping.
+      // Compressor keeps stacked cues from clipping; makeup gain restores loudness after it.
       const comp = ctx.createDynamicsCompressor();
-      comp.threshold.value = -18;
-      comp.ratio.value = 4;
-      master.connect(comp).connect(ctx.destination);
+      comp.threshold.value = -14;
+      comp.knee.value = 8;
+      comp.ratio.value = 3;
+      comp.attack.value = 0.003;
+      comp.release.value = 0.15;
+      const makeup = ctx.createGain();
+      makeup.gain.value = 1.8;
+      master.connect(comp).connect(makeup).connect(ctx.destination);
     } catch {
       ctx = null;
       return null;
@@ -92,7 +100,7 @@ function tone(c: AudioContext, o: ToneOpts) {
   osc.type = o.type ?? 'sine';
   osc.frequency.setValueAtTime(o.freq, t0);
   if (o.to) osc.frequency.exponentialRampToValueAtTime(o.to, t0 + o.dur);
-  const peak = o.gain ?? 0.3;
+  const peak = Math.min(0.95, (o.gain ?? 0.3) * CUE_BOOST);
   const attack = o.attack ?? 0.005;
   g.gain.setValueAtTime(0.0001, t0);
   g.gain.exponentialRampToValueAtTime(peak, t0 + attack);
@@ -124,7 +132,7 @@ function noise(c: AudioContext, o: { start?: number; dur: number; gain?: number;
   bp.frequency.setValueAtTime(o.from, t0);
   bp.frequency.exponentialRampToValueAtTime(o.to, t0 + o.dur);
   const g = c.createGain();
-  const peak = o.gain ?? 0.2;
+  const peak = Math.min(0.95, (o.gain ?? 0.2) * CUE_BOOST);
   g.gain.setValueAtTime(0.0001, t0);
   g.gain.exponentialRampToValueAtTime(peak, t0 + o.dur * 0.35);
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + o.dur);
@@ -169,7 +177,7 @@ export function playCue(cue: Cue, opts: { pan?: number } = {}): void {
       break;
     case 'launch':
       noise(c, { dur: 0.7, from: 200, to: 4000, gain: 0.1, q: 0.7 });
-      tone(c, { freq: 220, to: 880, type: 'sine', dur: 0.6, gain: 0.18, attack: 0.05 });
+      tone(c, { freq: 330, to: 990, type: 'triangle', dur: 0.6, gain: 0.18, attack: 0.05 });
       tone(c, { freq: 440, to: 1320, type: 'triangle', start: 0.1, dur: 0.5, gain: 0.08, attack: 0.05 });
       break;
     case 'agentStart':
@@ -189,7 +197,7 @@ export function playCue(cue: Cue, opts: { pan?: number } = {}): void {
     case 'rootCause': {
       // Low swell, then a bright major chord bloom.
       noise(c, { dur: 1.2, from: 120, to: 2400, gain: 0.08, q: 0.6 });
-      tone(c, { freq: 65.41, type: 'sine', dur: 1.6, gain: 0.3, attack: 0.08 });
+      tone(c, { freq: 130.81, type: 'triangle', dur: 1.6, gain: 0.22, attack: 0.08 });
       const chord = [261.63, 329.63, 392.0, 523.25, 659.25];
       chord.forEach((f, i) =>
         tone(c, { freq: f, type: i % 2 ? 'triangle' : 'sine', start: 0.25 + i * 0.07, dur: 1.6, gain: 0.11, attack: 0.03 }),
@@ -201,7 +209,7 @@ export function playCue(cue: Cue, opts: { pan?: number } = {}): void {
       tone(c, { freq: 880, type: 'square', dur: 0.12, gain: 0.07 });
       tone(c, { freq: 660, type: 'square', start: 0.16, dur: 0.12, gain: 0.07 });
       tone(c, { freq: 880, type: 'square', start: 0.32, dur: 0.12, gain: 0.07 });
-      tone(c, { freq: 110, type: 'sine', dur: 0.6, gain: 0.2 });
+      tone(c, { freq: 220, type: 'triangle', dur: 0.5, gain: 0.16 });
       break;
     case 'notify':
       tone(c, { freq: 1318.5, type: 'sine', dur: 0.18, gain: 0.12 });
