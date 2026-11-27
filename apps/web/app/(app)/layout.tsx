@@ -5,6 +5,8 @@ import { NAV, SOON } from '../../components/nav';
 import { LogoMark } from '../../components/logo';
 import { OrgSwitcher } from '../../components/org-switcher';
 import { NotificationBell } from '../../components/notification-bell';
+import { NotificationToaster } from '../../components/notification-toaster';
+import { SoundToggle, ThemeToggle } from '../../components/experience';
 import { logoutAction } from '../../lib/actions/auth';
 import {
   getAgents,
@@ -47,7 +49,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex min-h-screen">
-      <div className="hidden w-60 shrink-0 border-r border-[var(--border)] bg-[var(--surface)] lg:block">
+      <div className="hidden w-60 shrink-0 border-r border-[var(--border)] bg-[var(--surface)]/80 backdrop-blur-xl lg:block">
         <aside className="sticky top-0 flex h-screen flex-col px-4 py-5" aria-label="Sidebar">
           <div className="flex items-center gap-2.5 px-2">
             <LogoMark />
@@ -77,6 +79,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </nav>
 
           <div className="mt-auto space-y-3">
+            <div className="flex items-center justify-between px-2">
+              <span className="text-[11px] text-[var(--text-muted)]">Theme · Sound</span>
+              <span className="flex gap-1.5">
+                <ThemeToggle />
+                <SoundToggle />
+              </span>
+            </div>
             <AgentFleetBlock agents={agents} />
             {me ? (
               <UserMenu me={me} />
@@ -90,6 +99,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <div className="min-w-0 flex-1">
         <MobileBar me={me} orgLabel={orgLabel} unread={unread} />
         <div className="mx-auto max-w-[1280px] px-4 py-6 sm:px-8 sm:py-8">{children}</div>
+        {me && <NotificationToaster />}
       </div>
     </div>
   );
@@ -128,9 +138,9 @@ function AgentFleetBlock({ agents }: { agents: AgentSummary[] | null }) {
             title={`${a.name}: ${a.status.toLowerCase()}`}
             className={`h-1.5 flex-1 rounded-full ${
               a.status === 'BUSY'
-                ? 'bg-[var(--series-1)]'
+                ? 'helix-shimmer bg-[var(--accent)]'
                 : a.status === 'IDLE'
-                  ? 'bg-[var(--series-1-soft)]'
+                  ? 'bg-[var(--text-muted)]'
                   : 'bg-[var(--status-critical)] opacity-40'
             }`}
           />
@@ -150,8 +160,8 @@ function initials(name: string, email: string): string {
 function UserMenu({ me }: { me: Me }) {
   return (
     <details className="group relative">
-      <summary className="flex cursor-pointer list-none items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-[var(--canvas)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--series-1)] [&::-webkit-details-marker]:hidden">
-        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[var(--series-1-soft)] text-[11px] font-semibold text-[#0d3d73]">
+      <summary className="flex cursor-pointer list-none items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-[var(--canvas)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] [&::-webkit-details-marker]:hidden">
+        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-[11px] font-semibold text-[var(--accent-contrast)]">
           {initials(me.user.name, me.user.email)}
         </span>
         <span className="min-w-0 flex-1">
@@ -162,15 +172,15 @@ function UserMenu({ me }: { me: Me }) {
           ▴
         </span>
       </summary>
-      <div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1 shadow-[0_4px_16px_rgba(0,0,0,0.08)]">
-        <Link href="/settings" className="block rounded-md px-2.5 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--canvas)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--series-1)]">
+      <div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1 shadow-[var(--shadow-lg)]">
+        <Link href="/settings" className="block rounded-md px-2.5 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--canvas)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
           Settings
         </Link>
-        <Link href="/onboarding" className="block rounded-md px-2.5 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--canvas)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--series-1)]">
+        <Link href="/onboarding" className="block rounded-md px-2.5 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--canvas)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
           New organization
         </Link>
         <form action={logoutAction}>
-          <button type="submit" className="block w-full rounded-md px-2.5 py-1.5 text-left text-sm text-[var(--text-bad)] hover:bg-[var(--canvas)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--series-1)]">
+          <button type="submit" className="block w-full rounded-md px-2.5 py-1.5 text-left text-sm text-[var(--text-bad)] hover:bg-[var(--canvas)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
             Sign out
           </button>
         </form>
@@ -182,7 +192,7 @@ function UserMenu({ me }: { me: Me }) {
 /** Small-screen top bar: brand, org, horizontally scrollable nav, sign out. */
 function MobileBar({ me, orgLabel, unread }: { me: Me | null; orgLabel: string; unread: number | null }) {
   return (
-    <div className="border-b border-[var(--border)] bg-[var(--surface)] lg:hidden">
+    <div className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--surface)]/80 backdrop-blur-xl lg:hidden">
       <div className="flex items-center justify-between gap-3 px-4 pt-3">
         <div className="flex min-w-0 items-center gap-2">
           <LogoMark className="h-7 w-7" />
@@ -193,9 +203,11 @@ function MobileBar({ me, orgLabel, unread }: { me: Me | null; orgLabel: string; 
         </div>
         {me && (
           <div className="flex items-center gap-1">
+            <ThemeToggle />
+            <SoundToggle />
             <NotificationBell count={unread} />
             <form action={logoutAction}>
-              <button type="submit" className="rounded-md px-2 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--series-1)]">
+              <button type="submit" className="rounded-md px-2 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
                 Sign out
               </button>
             </form>

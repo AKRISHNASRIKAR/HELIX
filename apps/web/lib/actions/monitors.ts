@@ -89,3 +89,17 @@ export async function deleteMonitorAction(_prev: FormState, formData: FormData):
   if (!res.ok) return { error: res.error };
   return { success: 'Monitor deleted.' };
 }
+
+export type RunMonitorNowResult = { ok: true; result: MonitorRunResult } | { ok: false; error: string };
+
+/**
+ * Runs one monitor and returns the raw result, for the animated "Run now"
+ * sequence (called directly from a client component, not via a form).
+ */
+export async function runMonitorNow(id: string): Promise<RunMonitorNowResult> {
+  if (typeof id !== 'string' || !id) return { ok: false, error: 'Missing monitor.' };
+  const res = await apiRequest<MonitorRunResult>(`/monitors/${encodeURIComponent(id)}/run`, { method: 'POST' });
+  refresh();
+  if (!res.ok) return { ok: false, error: res.error };
+  return { ok: true, result: res.data };
+}

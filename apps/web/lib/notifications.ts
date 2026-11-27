@@ -67,3 +67,39 @@ export function groupNotificationsByDay<T extends Pick<AppNotification, 'created
   }
   return groups;
 }
+
+export type NotificationKind = 'opened' | 'completed' | 'failed' | 'other';
+
+/** Drives the feed / toast glyph. */
+export function notificationKind(type: string): NotificationKind {
+  if (/(failed|error)$/.test(type)) return 'failed';
+  if (/(completed|succeeded)$/.test(type)) return 'completed';
+  if (/opened$/.test(type)) return 'opened';
+  return 'other';
+}
+
+/**
+ * Where a toast/feed item should go. A just-opened investigation links to the
+ * live playback (`?play=1`) so the audience can watch it run.
+ */
+export function notificationHref(n: Pick<AppNotification, 'type' | 'link'>): string | null {
+  const link = safeNotificationLink(n.link);
+  if (!link) return null;
+  if (notificationKind(n.type) === 'opened' && /^\/investigations\/[^/?#]+$/.test(link)) return `${link}?play=1`;
+  return link;
+}
+
+/** Notifications strictly newer than `since` (ISO), newest first. All of them when `since` is null. */
+export function newerThan<T extends Pick<AppNotification, 'createdAt'>>(list: T[], since: string | null): T[] {
+  const t = since ? Date.parse(since) : Number.NEGATIVE_INFINITY;
+  return list
+    .filter((n) => Date.parse(n.createdAt) > t)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+}
+
+/** Newest createdAt in a list, or null. */
+export function newestAt(list: Pick<AppNotification, 'createdAt'>[]): string | null {
+  let best: string | null = null;
+  for (const n of list) if (!best || Date.parse(n.createdAt) > Date.parse(best)) best = n.createdAt;
+  return best;
+}

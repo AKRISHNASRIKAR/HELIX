@@ -1,12 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState } from 'react';
+import { useActionState, useEffect } from 'react';
+import { POLL_EVENT } from '../../../components/notification-toaster';
 import {
   createMonitorFromSuggestionAction,
   deleteMonitorAction,
   runAllMonitorsAction,
-  runMonitorAction,
   setMonitorEnabledAction,
 } from '../../../lib/actions/monitors';
 import { INITIAL_FORM_STATE, type FormState } from '../../../lib/actions/form-state';
@@ -31,6 +31,10 @@ function RunResult({ state }: { state: FormState }) {
 
 export function RunAllMonitorsButton({ disabled }: { disabled?: boolean }) {
   const [state, action] = useActionState(runAllMonitorsAction, INITIAL_FORM_STATE);
+  const opened = state.meta?.investigationId;
+  useEffect(() => {
+    if (opened) window.dispatchEvent(new Event(POLL_EVENT));
+  }, [opened]);
   return (
     <div className="flex flex-col items-end gap-2">
       <form action={action}>
@@ -49,33 +53,22 @@ export function RunAllMonitorsButton({ disabled }: { disabled?: boolean }) {
   );
 }
 
-export function MonitorRowActions({ id, name }: { id: string; name: string }) {
-  const [runState, run] = useActionState(runMonitorAction, INITIAL_FORM_STATE);
-  const [deleteState, remove] = useActionState(deleteMonitorAction, INITIAL_FORM_STATE);
+export function DeleteMonitorButton({ id, name }: { id: string; name: string }) {
+  const [state, remove] = useActionState(deleteMonitorAction, INITIAL_FORM_STATE);
   return (
-    <div className="flex flex-col items-end gap-2">
-      <div className="flex flex-wrap justify-end gap-1.5">
-        <form action={run}>
-          <input type="hidden" name="id" value={id} />
-          <SubmitButton variant="secondary" size="sm" pendingLabel="Running...">
-            Run now
-          </SubmitButton>
-        </form>
-        <form action={remove}>
-          <input type="hidden" name="id" value={id} />
-          <SubmitButton
-            variant="ghost"
-            size="sm"
-            pendingLabel="Deleting..."
-            confirmMessage={`Delete the monitor "${name}"? Investigations it opened are kept.`}
-          >
-            <span className="sr-only">Delete {name}</span>
-            <span aria-hidden>Delete</span>
-          </SubmitButton>
-        </form>
-      </div>
-      <RunResult state={deleteState.error ? deleteState : runState} />
-    </div>
+    <form action={remove} className="inline-flex flex-col items-end gap-1">
+      <input type="hidden" name="id" value={id} />
+      <SubmitButton
+        variant="ghost"
+        size="sm"
+        pendingLabel="Deleting..."
+        confirmMessage={`Delete the monitor "${name}"? Investigations it opened are kept.`}
+      >
+        <span className="sr-only">Delete {name}</span>
+        <span aria-hidden>Delete</span>
+      </SubmitButton>
+      {state.error && <span className="text-[11px] text-[var(--text-bad)]">{state.error}</span>}
+    </form>
   );
 }
 
@@ -91,13 +84,13 @@ export function MonitorToggle({ id, name, enabled }: { id: string; name: string;
         role="switch"
         aria-checked={enabled}
         aria-label={`${enabled ? 'Pause' : 'Enable'} monitor ${name}`}
-        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--series-1)] focus-visible:ring-offset-2 ${
-          enabled ? 'bg-[var(--series-1)]' : 'bg-[#d4d3cd]'
+        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)] ${
+          enabled ? 'bg-[var(--accent)] shadow-[0_0_14px_-2px_var(--glow-strong)]' : 'bg-[var(--border-strong)]'
         }`}
       >
         <span
           aria-hidden
-          className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-[18px]' : 'translate-x-0.5'}`}
+          className={`inline-block h-4 w-4 rounded-full bg-[var(--accent-contrast)] shadow-[var(--shadow)] transition-transform ${enabled ? 'translate-x-[18px]' : 'translate-x-0.5'}`}
         />
       </button>
       {state.error && <span className="text-[11px] text-[var(--text-bad)]">{state.error}</span>}

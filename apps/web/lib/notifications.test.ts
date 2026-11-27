@@ -6,6 +6,10 @@ import {
   notificationTypeLabel,
   safeNotificationLink,
   unreadBadge,
+  newerThan,
+  newestAt,
+  notificationHref,
+  notificationKind,
 } from './notifications';
 
 describe('notificationTypeLabel', () => {
@@ -68,5 +72,41 @@ describe('groupNotificationsByDay', () => {
       ['Oct 8, 2026', ['d']],
       ['Earlier', ['e']],
     ]);
+  });
+});
+
+describe('notificationKind / notificationHref', () => {
+  it('classifies types', () => {
+    expect(notificationKind('investigation.autonomous_opened')).toBe('opened');
+    expect(notificationKind('investigation.completed')).toBe('completed');
+    expect(notificationKind('investigation.autonomous_failed')).toBe('failed');
+    expect(notificationKind('member.added')).toBe('other');
+  });
+
+  it('sends just-opened investigations to the live playback', () => {
+    expect(notificationHref({ type: 'investigation.autonomous_opened', link: '/investigations/abc' })).toBe(
+      '/investigations/abc?play=1',
+    );
+    expect(notificationHref({ type: 'investigation.completed', link: '/investigations/abc' })).toBe('/investigations/abc');
+    expect(notificationHref({ type: 'investigation.autonomous_opened', link: 'https://evil.test' })).toBeNull();
+    expect(notificationHref({ type: 'investigation.autonomous_opened', link: '/investigations/abc?x=1' })).toBe(
+      '/investigations/abc?x=1',
+    );
+  });
+});
+
+describe('newerThan / newestAt', () => {
+  const list = [
+    { id: 'a', createdAt: '2026-11-27T10:00:00.000Z' },
+    { id: 'b', createdAt: '2026-11-27T12:00:00.000Z' },
+    { id: 'c', createdAt: '2026-11-27T11:00:00.000Z' },
+  ];
+  it('keeps only newer items, newest first', () => {
+    expect(newerThan(list, '2026-11-27T10:00:00.000Z').map((n) => n.id)).toEqual(['b', 'c']);
+    expect(newerThan(list, null).map((n) => n.id)).toEqual(['b', 'c', 'a']);
+  });
+  it('finds the newest timestamp', () => {
+    expect(newestAt(list)).toBe('2026-11-27T12:00:00.000Z');
+    expect(newestAt([])).toBeNull();
   });
 });
