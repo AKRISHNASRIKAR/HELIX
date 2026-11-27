@@ -1,131 +1,333 @@
 'use client';
 
-import { useState } from 'react';
-import type { RevenuePoint } from '../lib/api';
+import { motion, useInView, useReducedMotion } from 'motion/react';
+import { useId, useRef, useState } from 'react';
+import type { RevenueData, RevenuePoint } from '../lib/api';
 import { formatCurrency, formatShortDate } from '../lib/format';
 import { Legend } from './charts';
+import { EASE } from './motion';
+import { useMeasuredWidth } from './dashboard/use-measure';
 
-/** Actual revenue vs forecast band, with the anomaly window shaded and a hover crosshair. */
-export function RevenueChart({ data }: { data: RevenuePoint[] }) {
+type Projection = NonNullable<RevenueData['projection']>;
+
+/** 1, 2, 2.5 or 5 times a power of ten, at least `raw`. */
+function niceStep(raw: number) {
+  if (!(raw > 0)) return 1;
+  const p = 10 ** Math.floor(Math.log10(raw));
+  const m = raw / p;
+  return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p;
+}
+
+const pathOf = (pts: [number, number][]) =>
+  pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join('');
+
+/**
+ * Actual revenue vs the expected band. The line draws itself in, the band
+ * fades up behind it, anomaly days get a marker (red for drops) and the
+ * story day gets a pulsing marker with a callout. Hover for a crosshair.
+ */
+export function RevenueChart({
+  data,
+  projection,
+  highlightDate,
+  highlightDeltaPercent,
+  height = 300,
+}: {
+  data: RevenuePoint[];
+  projection?: Projection;
+  highlightDate?: string | null;
+  /** The story's own % change, so the callout matches the headline. */
+  highlightDeltaPercent?: number | null;
+  height?: number;
+}) {
+  const id = useId().replace(/:/g, '');
+  const [box, W] = useMeasuredWidth<HTMLDivElement>(760);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const inView = useInView(svgRef, { once: true, margin: '-60px' });
+  const reduce = useReducedMotion();
   const [hover, setHover] = useState<number | null>(null);
-  const W = 760;
-  const H = 260;
-  const pad = { l: 44, r: 8, t: 12, b: 24 };
+  const show = inView || reduce;
+
+  const proj = projection ?? [];
+  const H = height;
+  const pad = { l: 48, r: 14, t: 34, b: 26 };
   const iw = W - pad.l - pad.r;
   const ih = H - pad.t - pad.b;
+  const n = data.length + proj.length;
+  if (data.length < 2) return <div ref={box} />;
 
-  const lo = Math.floor(Math.min(...data.map((d) => Math.min(d.revenue, d.lower))) / 20_000) * 20_000;
-  const hi = Math.ceil(Math.max(...data.map((d) => Math.max(d.revenue, d.upper))) / 20_000) * 20_000;
-  const x = (i: number) => pad.l + (i / (data.length - 1)) * iw;
-  const y = (v: number) => pad.t + ih - ((v - lo) / (hi - lo)) * ih;
+  const values = [
+    ...data.flatMap((d) => [d.revenue, d.lower, d.upper]),
+    ...proj.flatMap((p) => [p.lower, p.upper]),
+  ];
+  const rawLo = Math.min(...values);
+  const rawHi = Math.max(...values);
+  const unit = niceStep((rawHi - rawLo) / 4);
+  const lo = Math.max(0, Math.floor(rawLo / unit) * unit);
+  const hi = Math.max(lo + unit, Math.ceil(rawHi / unit) * unit);
+  const x = (i: number) => pad.l + (i / Math.max(1, n - 1)) * iw;
+  const y = (v: number) => pad.t + ih - ((v - lo) / (hi - lo || 1)) * ih;
 
-  const line = (key: 'revenue' | 'forecast') =>
-    data.map((d, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(d[key]).toFixed(1)}`).join('');
+  const actual = pathOf(data.map((d, i) => [x(i), y(d.revenue)]));
+  const expected = pathOf(data.map((d, i) => [x(i), y(d.forecast)]));
   const band =
-    data.map((d, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(d.upper).toFixed(1)}`).join('') +
-    [...data]
-      .map((d, i) => ({ d, i }))
+    pathOf(data.map((d, i) => [x(i), y(d.upper)])) +
+    data
+      .map((d, i) => [x(i), y(d.lower)] as [number, number])
       .reverse()
-      .map(({ d, i }) => `L${x(i).toFixed(1)},${y(d.lower).toFixed(1)}`)
+      .map(([px, py]) => `L${px.toFixed(1)},${py.toFixed(1)}`)
       .join('') +
     'Z';
-  const area = `${line('revenue')}L${x(data.length - 1)},${pad.t + ih}L${x(0)},${pad.t + ih}Z`;
+  const area = `${actual}L${x(data.length - 1)},${pad.t + ih}L${x(0)},${pad.t + ih}Z`;
+  const j0 = data.length - 1;
+  const projLine = proj.length
+    ? pathOf([[x(j0), y(data[j0]!.revenue)], ...proj.map((p, k) => [x(j0 + 1 + k), y(p.value)] as [number, number])])
+    : '';
+  const projBand = proj.length
+    ? pathOf([[x(j0), y(data[j0]!.revenue)], ...proj.map((p, k) => [x(j0 + 1 + k), y(p.upper)] as [number, number])]) +
+      [...proj]
+        .map((p, k) => [x(j0 + 1 + k), y(p.lower)] as [number, number])
+        .reverse()
+        .map(([px, py]) => `L${px.toFixed(1)},${py.toFixed(1)}`)
+        .join('') +
+      `L${x(j0).toFixed(1)},${y(data[j0]!.revenue).toFixed(1)}Z`
+    : '';
 
-  const anomalyIdx = data.map((d, i) => (d.isAnomaly ? i : -1)).filter((i) => i >= 0);
-  const a0 = anomalyIdx[0];
-  const a1 = anomalyIdx[anomalyIdx.length - 1];
-  const ticks = Array.from({ length: 5 }, (_, i) => lo + ((hi - lo) / 4) * i);
-  const h = hover == null ? null : data[hover]!;
+  const anomalies = data.map((d, i) => ({ d, i })).filter(({ d }) => d.isAnomaly);
+  const hi0 = highlightDate ? data.findIndex((d) => d.date === highlightDate) : -1;
+  const story = hi0 >= 0 ? data[hi0]! : null;
+  const storyPct = highlightDeltaPercent ?? (story && story.forecast ? (story.revenue / story.forecast - 1) * 100 : null);
+  const ticks = Array.from({ length: Math.round((hi - lo) / unit) + 1 }, (_, i) => lo + unit * i);
+  const monthTicks = data
+    .map((d, i) => ({ d, i }))
+    .filter(({ d }, k) => d.date.endsWith('-01') || (k === 0 && Number(d.date.slice(8)) < 20));
+  const h = hover == null ? null : hover < data.length ? { kind: 'actual' as const, p: data[hover]! } : { kind: 'proj' as const, p: proj[hover - data.length]! };
+
+  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const r = svgRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const px = e.clientX - r.left;
+    const i = Math.round(((px - pad.l) / iw) * (n - 1));
+    setHover(i < 0 || i >= n ? null : i);
+  };
+
+  const DRAW = 1.8;
+  const calloutX = story ? Math.min(Math.max(x(hi0), pad.l + 70), W - pad.r - 70) : 0;
 
   return (
-    <div className="relative">
-      <Legend
-        items={[
-          { label: 'Actual revenue', color: 'var(--series-1)' },
-          { label: 'Forecast', color: 'var(--text-muted)', dashed: true },
-          { label: '80% interval', color: 'var(--band)' },
-          { label: 'Anomaly window', color: 'var(--anomaly-fill)' },
-        ]}
-      />
+    <div ref={box} className="relative">
       <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="mt-3 w-full"
+        ref={svgRef}
+        width={W}
+        height={H}
+        className="block touch-none select-none"
         role="img"
-        aria-label="Daily revenue versus forecast, last 90 days"
+        aria-label="Daily revenue against the expected band"
+        onMouseMove={onMove}
         onMouseLeave={() => setHover(null)}
-        onMouseMove={(e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          const px = ((e.clientX - r.left) / r.width) * W;
-          const i = Math.round(((px - pad.l) / iw) * (data.length - 1));
-          setHover(Math.max(0, Math.min(data.length - 1, i)));
-        }}
       >
         <defs>
-          <linearGradient id="rev-fill" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="var(--series-1)" stopOpacity={0.18} />
-            <stop offset="100%" stopColor="var(--series-1)" stopOpacity={0} />
+          <linearGradient id={`ra-${id}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" style={{ stopColor: 'var(--series-1)', stopOpacity: 0.16 }} />
+            <stop offset="100%" style={{ stopColor: 'var(--series-1)', stopOpacity: 0 }} />
           </linearGradient>
+          <clipPath id={`rc-${id}`}>
+            <motion.rect
+              x={0}
+              y={0}
+              height={H}
+              initial={reduce ? false : { width: 0 }}
+              animate={show ? { width: W } : {}}
+              transition={{ duration: DRAW, ease: EASE }}
+            />
+          </clipPath>
         </defs>
+
         {ticks.map((t) => (
           <g key={t}>
             <line x1={pad.l} x2={W - pad.r} y1={y(t)} y2={y(t)} stroke="var(--grid)" />
-            <text x={pad.l - 8} y={y(t) + 3} textAnchor="end" className="fill-[var(--text-muted)] text-[10px]">
+            <text x={pad.l - 8} y={y(t) + 3} textAnchor="end" fontSize={10} fill="var(--text-muted)" className="tabular-nums">
               {formatCurrency(t)}
             </text>
           </g>
         ))}
-        {a0 != null && a1 != null && (
-          <g>
-            <rect
-              x={x(a0) - 4}
-              y={pad.t}
-              width={x(a1) - x(a0) + 8}
-              height={ih}
-              fill="var(--anomaly-fill)"
-              rx={4}
-            />
-            <text x={x(a0) - 8} y={pad.t + 12} textAnchor="end" className="fill-[var(--text-bad)] text-[10px] font-semibold">
-              −22% vs forecast
-            </text>
-          </g>
-        )}
-        <path d={band} fill="var(--band)" />
-        <path d={area} fill="url(#rev-fill)" />
-        <path d={line('forecast')} fill="none" stroke="var(--text-muted)" strokeWidth={1.25} strokeDasharray="4 3" />
-        <path d={line('revenue')} fill="none" stroke="var(--series-1)" strokeWidth={2} strokeLinejoin="round" />
-        {anomalyIdx.map((i) => (
-          <circle key={i} cx={x(i)} cy={y(data[i]!.revenue)} r={4} fill="var(--status-critical)" stroke="var(--surface)" strokeWidth={2} />
+        {monthTicks.map(({ d, i }) => (
+          <text key={d.date} x={x(i)} y={H - 8} fontSize={10} fill="var(--text-muted)" textAnchor="start">
+            {new Date(`${d.date}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })}
+          </text>
         ))}
-        {data.map((d, i) =>
-          i % 15 === 0 ? (
-            <text key={d.date} x={x(i)} y={H - 6} textAnchor="middle" className="fill-[var(--text-muted)] text-[10px]">
-              {formatShortDate(d.date)}
+
+        {/* Expected band and line */}
+        <motion.path
+          d={band}
+          fill="var(--band)"
+          initial={reduce ? false : { opacity: 0 }}
+          animate={show ? { opacity: 1 } : {}}
+          transition={{ duration: 0.9 }}
+        />
+        <motion.path
+          d={expected}
+          fill="none"
+          stroke="var(--series-2)"
+          strokeWidth={1.25}
+          strokeDasharray="4 4"
+          initial={reduce ? false : { opacity: 0 }}
+          animate={show ? { opacity: 0.9 } : {}}
+          transition={{ duration: 0.9, delay: 0.2 }}
+        />
+
+        {/* Forecast after the last day */}
+        {proj.length > 0 && (
+          <motion.g
+            initial={reduce ? false : { opacity: 0 }}
+            animate={show ? { opacity: 1 } : {}}
+            transition={{ duration: 0.6, delay: DRAW }}
+          >
+            <rect x={x(j0)} y={pad.t} width={x(n - 1) - x(j0)} height={ih} fill="var(--surface-2)" opacity={0.6} />
+            <path d={projBand} fill="var(--band)" />
+            <path d={projLine} fill="none" stroke="var(--series-2)" strokeWidth={1.5} strokeDasharray="2 4" strokeLinecap="round" />
+            <text x={x(j0) + 6} y={pad.t + 12} fontSize={10} fill="var(--text-muted)">
+              forecast
             </text>
-          ) : null,
+          </motion.g>
         )}
-        {h && hover != null && (
+
+        {/* Actual revenue: area wipes in, line draws itself */}
+        <g clipPath={`url(#rc-${id})`}>
+          <path d={area} fill={`url(#ra-${id})`} />
+        </g>
+        <motion.path
+          d={actual}
+          fill="none"
+          stroke="var(--series-1)"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          initial={reduce ? false : { pathLength: 0 }}
+          animate={show ? { pathLength: 1 } : {}}
+          transition={{ duration: DRAW, ease: EASE }}
+        />
+
+        {/* Anomaly markers */}
+        {anomalies.map(({ d, i }) => {
+          const drop = d.revenue < d.forecast;
+          const isStory = i === hi0;
+          const delay = (i / data.length) * DRAW;
+          return (
+            <motion.g
+              key={d.date}
+              initial={reduce ? false : { opacity: 0 }}
+              animate={show ? { opacity: 1 } : {}}
+              transition={{ duration: 0.4, delay, ease: EASE }}
+            >
+              {drop && <line x1={x(i)} x2={x(i)} y1={y(d.forecast)} y2={y(d.revenue)} stroke="var(--status-critical)" strokeWidth={1} strokeDasharray="2 2" />}
+              {isStory && (
+                <circle cx={x(i)} cy={y(d.revenue)} r={6} fill="var(--status-critical)" className="helix-ping" style={{ transformBox: 'fill-box', transformOrigin: 'center' }} />
+              )}
+              <circle
+                cx={x(i)}
+                cy={y(d.revenue)}
+                r={isStory ? 5.5 : 4}
+                fill={drop ? 'var(--status-critical)' : 'var(--surface)'}
+                stroke={drop ? 'var(--surface)' : 'var(--series-1)'}
+                strokeWidth={2}
+              />
+            </motion.g>
+          );
+        })}
+
+        {/* Callout for the story day */}
+        {story && (
+          <motion.g
+            initial={reduce ? false : { opacity: 0, y: 6 }}
+            animate={show ? { opacity: 1, y: 0 } : {}}
+            transition={{ duration: 0.5, delay: DRAW + 0.1, ease: EASE }}
+          >
+            <line x1={x(hi0)} x2={x(hi0)} y1={pad.t - 6} y2={y(Math.max(story.forecast, story.upper))} stroke="var(--status-critical)" strokeWidth={1} opacity={0.6} />
+            <rect x={calloutX - 66} y={pad.t - 30} width={132} height={22} rx={11} fill="var(--status-critical)" />
+            <text x={calloutX} y={pad.t - 15} textAnchor="middle" fontSize={11} fontWeight={600} fill="var(--accent-contrast)" className="tabular-nums">
+              {storyPct !== null ? `${storyPct.toFixed(1)}%` : 'Anomaly'} on {formatShortDate(story.date)}
+            </text>
+          </motion.g>
+        )}
+
+        {/* Crosshair */}
+        {hover != null && h && (
           <g pointerEvents="none">
-            <line x1={x(hover)} x2={x(hover)} y1={pad.t} y2={pad.t + ih} stroke="var(--text-muted)" strokeWidth={1} />
-            <circle cx={x(hover)} cy={y(h.revenue)} r={4.5} fill="var(--series-1)" stroke="var(--surface)" strokeWidth={2} />
+            <line x1={x(hover)} x2={x(hover)} y1={pad.t} y2={pad.t + ih} stroke="var(--border-strong)" />
+            <circle
+              cx={x(hover)}
+              cy={y(h.kind === 'actual' ? h.p.revenue : h.p.value)}
+              r={4}
+              fill="var(--series-1)"
+              stroke="var(--surface)"
+              strokeWidth={2}
+            />
           </g>
         )}
       </svg>
-      {h && hover != null && (
+
+      {hover != null && h && (
         <div
-          className="pointer-events-none absolute top-8 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs shadow-lg"
-          style={{
-            left: `${(x(hover) / W) * 100}%`,
-            transform: `translateX(${hover > data.length * 0.7 ? 'calc(-100% - 12px)' : '12px'})`,
-          }}
+          className="pointer-events-none absolute top-8 z-10 w-48 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-3 text-xs shadow-[var(--shadow-lg)]"
+          style={{ left: Math.min(Math.max(x(hover) + 12, 0), W - 200) }}
         >
-          <p className="font-medium text-[var(--text-primary)]">{formatShortDate(h.date)}</p>
-          <p className="mt-1 tabular-nums text-[var(--text-secondary)]">
-            Actual <span className="font-semibold text-[var(--text-primary)]">{formatCurrency(h.revenue, false)}</span>
+          <p className="font-semibold">
+            {formatShortDate(h.p.date)}
+            {h.kind === 'proj' && <span className="ml-1.5 font-normal text-[var(--text-muted)]">forecast</span>}
           </p>
-          <p className="tabular-nums text-[var(--text-secondary)]">Forecast {formatCurrency(h.forecast, false)}</p>
-          {h.isAnomaly && <p className="mt-1 font-medium text-[var(--text-bad)]">● Anomaly flagged</p>}
+          {h.kind === 'actual' ? (
+            <dl className="mt-2 space-y-1 tabular-nums">
+              <div className="flex justify-between">
+                <dt className="text-[var(--text-secondary)]">Revenue</dt>
+                <dd className={`font-semibold ${h.p.isAnomaly && h.p.revenue < h.p.forecast ? 'text-[var(--text-bad)]' : ''}`}>
+                  {formatCurrency(h.p.revenue, false)}
+                </dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-[var(--text-secondary)]">Expected</dt>
+                <dd>{formatCurrency(h.p.forecast, false)}</dd>
+              </div>
+              <div className="flex justify-between text-[var(--text-muted)]">
+                <dt>Normal range</dt>
+                <dd>
+                  {formatCurrency(h.p.lower)} to {formatCurrency(h.p.upper)}
+                </dd>
+              </div>
+              {h.p.isAnomaly && (
+                <p className="pt-1 font-medium text-[var(--text-bad)]">
+                  Flagged{h.p.zScore != null ? `, z ${h.p.zScore.toFixed(1)}` : ''}
+                </p>
+              )}
+            </dl>
+          ) : (
+            <dl className="mt-2 space-y-1 tabular-nums">
+              <div className="flex justify-between">
+                <dt className="text-[var(--text-secondary)]">Forecast</dt>
+                <dd className="font-semibold">{formatCurrency(h.p.value, false)}</dd>
+              </div>
+              <div className="flex justify-between text-[var(--text-muted)]">
+                <dt>Interval</dt>
+                <dd>
+                  {formatCurrency(h.p.lower)} to {formatCurrency(h.p.upper)}
+                </dd>
+              </div>
+            </dl>
+          )}
         </div>
       )}
+
+      <div className="mt-3">
+        <Legend
+          items={[
+            { label: 'Revenue', color: 'var(--series-1)' },
+            { label: 'Expected', color: 'var(--series-2)', dashed: true },
+            { label: 'Normal range', color: 'var(--band)', area: true },
+            { label: 'Flagged drop', color: 'var(--status-critical)', area: true },
+            ...(proj.length ? [{ label: 'Forecast', color: 'var(--series-3)', dashed: true }] : []),
+          ]}
+        />
+      </div>
     </div>
   );
 }

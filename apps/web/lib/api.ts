@@ -397,9 +397,49 @@ export const getDataSourceProfile = (id: string, table: string) =>
   );
 
 // ------------------------------------------------------------------ analytics
-// Served by the API's demo module (HELIX_DEMO=1) until real analytics
-// endpoints exist. Each helper returns null when unavailable so sections can
-// render an empty state.
+// Served by the API's analytics module (computed by the analytics engine
+// over the org's first orders-like table, cached 60s) or by the demo module
+// when HELIX_DEMO=1. Each helper returns null when unavailable (404 when no
+// usable data source) so sections can render an empty state.
+
+/** The table the analytics endpoints were computed from. */
+export interface AnalyticsSourceRef {
+  dataSourceId: string;
+  dataSourceName: string;
+  table: string;
+  timeColumn: string;
+  valueColumn: string;
+  /** Last day of the data (YYYY-MM-DD): every window is anchored here. */
+  seriesEnd: string;
+}
+/** One slice (e.g. channel = web) of the anomaly day's change vs expected. */
+export interface StorySlice {
+  value: string;
+  actual: number;
+  expected: number;
+  delta: number;
+  /** Percent, e.g. -82.9. */
+  deltaPercent: number | null;
+  /** Fraction of the total change this slice explains (can exceed 1). */
+  shareOfDelta: number;
+}
+/** The worst revenue anomaly day, split by its most concentrated dimension. */
+export interface RevenueStory {
+  date: string;
+  weekday: string;
+  direction: 'spike' | 'drop';
+  severity: Severity;
+  zScore: number;
+  actual: number;
+  expected: number;
+  delta: number;
+  /** Percent, e.g. -38.8. */
+  deltaPercent: number | null;
+  dimension: string | null;
+  slices: StorySlice[];
+  topSlice: (StorySlice & { column: string }) | null;
+  baselineMethod: string;
+}
 
 export interface Kpi {
   key: string;
@@ -408,10 +448,14 @@ export interface Kpi {
   unit: 'currency' | 'percent' | 'count' | 'minutes';
   delta: number;
   spark: number[];
+  previous?: number | null;
+  sparkDays?: string[];
 }
 export interface Overview {
   generatedAt: string;
   kpis: Kpi[];
+  source?: AnalyticsSourceRef;
+  window?: { currentStart: string; currentEnd: string; previousStart: string; previousEnd: string };
 }
 export interface RevenuePoint {
   date: string;
@@ -420,11 +464,24 @@ export interface RevenuePoint {
   lower: number;
   upper: number;
   isAnomaly: boolean;
+  zScore?: number | null;
 }
 export interface RevenueData {
   series: RevenuePoint[];
   bySegment: { segment: string; current: number; previous: number }[];
   channelMix: { channel: string; share: number }[];
+  /** How forecast/lower/upper were computed (a fitted band, not a backtest). */
+  bandMethod?: string;
+  detectionMethod?: string;
+  /** Forward forecast after the last day. */
+  projection?: { date: string; value: number; lower: number; upper: number }[];
+  projectionMethod?: string;
+  projectionMape?: number | null;
+  /** Column bySegment/channelMix/channelSeries are split by. */
+  segmentColumn?: string | null;
+  channelSeries?: { channel: string; points: { date: string; value: number }[] }[];
+  story?: RevenueStory | null;
+  source?: AnalyticsSourceRef;
 }
 export type Severity = 'critical' | 'serious' | 'warning';
 export interface Anomaly {
@@ -435,10 +492,19 @@ export interface Anomaly {
   change: number;
   detectedAt: string;
   segment: string;
+  date?: string;
+  metricKey?: string;
+  value?: number;
+  expectedValue?: number;
+  direction?: 'spike' | 'drop';
+  description?: string;
 }
 export interface AnomalyData {
   items: Anomaly[];
-  heatmap: { metrics: string[]; days: string[]; cells: number[][] };
+  heatmap: { metrics: string[]; days: string[]; cells: number[][]; metricKeys?: string[] };
+  /** |z| at or above this is flagged. */
+  threshold?: number;
+  source?: AnalyticsSourceRef;
 }
 export interface ThroughputDay {
   date: string;
@@ -597,6 +663,41 @@ export async function getRecentAnomalies(limit = 50): Promise<AnomalyRecord[] | 
   if (isDemoMode()) return null;
   const list = await getJson<AnomalyRecord[]>(`/anomalies?limit=${limit}`);
   return Array.isArray(list) ? list : null;
+}
+
+/** An anomaly as the monitor engine reports it (run results and `/monitors/:id/series`). */
+export interface MonitorAnomaly {
+  /** YYYY-MM-DD (UTC). */
+  date: string;
+  timestamp: string;
+  direction: 'drop' | 'spike' | string;
+  severity: AnomalySeverityLevel | string;
+  value: number;
+  expectedValue: number;
+  deviationScore: number;
+  detectionMethod: string;
+  description: string;
+}
+
+/** `GET /monitors/:id/series`: the watched daily series with every detected anomaly. */
+export interface MonitorSeries {
+  monitorId: string;
+  monitorName: string;
+  unit: string | null;
+  lookbackDays: number;
+  minSeverity: AnomalySeverityLevel | string;
+  methodUsed: string | null;
+  seriesEnd: string | null;
+  series: { date: string; value: number | null }[];
+  anomalies: MonitorAnomaly[];
+  /** The anomaly a run would act on now, or null. */
+  picked: MonitorAnomaly | null;
+}
+
+export async function getMonitorSeries(id: string): Promise<MonitorSeries | null> {
+  if (isDemoMode()) return null;
+  const data = await getJson<MonitorSeries>(`/monitors/${encodeURIComponent(id)}/series`);
+  return data && Array.isArray(data.series) ? data : null;
 }
 
 // ------------------------------------------------------------------- trace
