@@ -13,6 +13,11 @@ Root cause (Phase 7):
   evidence plus the `root_cause_ranking` evidence.
 - When only a bare anomaly exists (no enrichments), the Phase 5 rule applies:
   the highest-confidence DIAGNOSTIC finding with confidence >= 0.9.
+- Culprit and fix plan: when the selected candidate's trigger is a deploy
+  (`event_alignment`, not a revert), the ranking evidence also carries
+  `culprit` (who shipped what, from the deploy feed) and a rules-based
+  `fixPlan` (fix_plan.py), and that event's recommendation is rewritten to
+  name the author and the first fix steps.
 """
 
 from __future__ import annotations
@@ -36,6 +41,8 @@ from helix_contracts import (
     RunTask,
 )
 from helix_root_cause import METHOD, RootCauseCandidate, rank_root_causes
+
+from .fix_plan import build_fix_plan, culprit_from_event, format_when
 
 #: Phase 5: a DIAGNOSTIC finding needs at least this confidence to be called the root cause.
 ROOT_CAUSE_MIN_CONFIDENCE = 0.9
@@ -129,6 +136,16 @@ def synthesize_root_cause(
         confidence=top.score if top else 0.0,
         collectedAt=datetime.now(UTC),
     )
+    if selected is not None and selected.event_evidence_id is not None:
+        by_id = {e.id: e for e in evidence}
+        event = by_id.get(selected.event_evidence_id)
+        anchor = by_id.get(selected.anomaly_evidence_id) if selected.anomaly_evidence_id else None
+        culprit = culprit_from_event(event) if event is not None else None
+        if culprit is not None and anchor is not None:
+            ranking.data["culprit"] = culprit
+            ranking.data["fixPlan"] = build_fix_plan(
+                culprit, evidence=evidence, anchor=anchor, event=event
+            )
     outcome = RootCauseOutcome(ranking_evidence=ranking, candidates=candidates)
 
     if not enriched:
@@ -524,12 +541,63 @@ def _event_recommendation(
     )
 
 
+def _culprit_recommendation(
+    data: dict[str, Any], culprit: dict[str, Any], plan: dict[str, Any], links: list[UUID]
+) -> RunRecommendation:
+    """The event recommendation when that event is the root cause's culprit."""
+    name = " ".join(str(x) for x in (culprit.get("service"), culprit.get("version")) if x)
+    name = name or culprit.get("description") or "deploy"
+    author = culprit.get("author")
+    when = format_when(culprit.get("deployedAt") or (data.get("event") or {}).get("time"))
+    shipped = f"shipped by {author}" if author else "shipped"
+    if when:
+        shipped += f" at {when}"
+    status = {
+        "rolled_back": " It has since been rolled back.",
+        "failed": " The deploy failed.",
+        "needs_rollback": " It has not been rolled back.",
+    }.get(plan.get("state"), "")
+    metric = data.get("metricName") or data.get("metricKey") or "metric"
+    steps = [s.get("title") for s in plan.get("steps") or [] if s.get("title")]
+    numbered = " ".join(f"{i}. {t}." for i, t in enumerate(steps[:3], start=1))
+    title = f"Fix the {name} change" + (f" (caused by {author})" if author else "")
+    impact = {
+        "rolled_back": f"Closes the incident and stops the same change from hurting {metric} "
+        "again when it is re-shipped.",
+        "needs_rollback": f"Stops further {metric} loss from the {name} change.",
+        "failed": "Confirms users are on a working version and closes the incident.",
+    }.get(plan.get("state"), "Closes the incident.")
+    return RunRecommendation(
+        id=uuid4(),
+        title=title,
+        description=(
+            f"{name}, {shipped}, is the most likely trigger of the {metric} anomaly.{status} "
+            f"Fix plan: {numbered}"
+        ).strip(),
+        priority=RecommendationPriority.CRITICAL,
+        expectedImpact=impact,
+        findingIds=links,
+    )
+
+
+def _ranking_culprit(
+    evidence_by_id: dict[UUID, RunEvidence],
+) -> tuple[str | None, dict[str, Any] | None, dict[str, Any] | None]:
+    for evidence in evidence_by_id.values():
+        data = evidence.data or {}
+        if data.get("kind") == "root_cause_ranking" and isinstance(data.get("culprit"), dict):
+            culprit = data["culprit"]
+            return culprit.get("evidenceId"), culprit, data.get("fixPlan") or {}
+    return None, None, None
+
+
 def build_recommendations(
     findings: list[RunFinding],
     evidence_by_id: dict[UUID, RunEvidence],
     root: RunFinding | None,
 ) -> list[RunRecommendation]:
     root_evidence = set(root.evidence_ids) if root is not None else set()
+    culprit_evidence_id, culprit, plan = _ranking_culprit(evidence_by_id)
     recommendations: list[RunRecommendation] = []
     seen: set[str] = set()
     for finding in findings:
@@ -555,6 +623,10 @@ def build_recommendations(
                 rec = _kpi_recommendation(finding, data)
             elif kind in ("segment", "segment_volume"):
                 rec = _segment_recommendation(data, links)
+            elif kind == "event_alignment" and culprit is not None and (
+                str(evidence_id) == culprit_evidence_id
+            ):
+                rec = _culprit_recommendation(data, culprit, plan or {}, links)
             elif kind == "event_alignment":
                 rec = _event_recommendation(data, links, evidence.confidence)
             if rec is None:

@@ -32,6 +32,25 @@ score >= 0.75; the Coordinator records it as a COORDINATOR finding linked to
 all contributing evidence plus a `root_cause_ranking` evidence row from a real
 synthesis task. When nothing enriches the anomaly, the Phase 5 rule applies.
 
+**Culprit and fix plan.** When the selected candidate's trigger is a deploy
+that is not a revert, the `root_cause_ranking` evidence also carries a
+`culprit` and a `fixPlan`, and the root cause statement ends with "shipped by
+<author>". The Product Agent supplies the facts: each `event_alignment` has a
+`change` (author, service, version, status, commit, copied from the feed's
+labels) and a `history` from one extra `/events/align` call filtered to the
+same services (`previous` = the last earlier deploy that did not fail and was
+not rolled back, `rollback` = the next deploy when it reads as a revert or the
+change is marked rolled back). The Coordinator turns these into 3 to 5 ordered
+steps by rules (`helix_agent_coordinator/fix_plan.py`): `rolled_back`,
+`needs_rollback` or `failed`, plus `recovered`, which is true only when the run
+has no further anomaly on the investigated metric after the rollback day,
+up to the end of the metric's KPI window. The LLM is not involved, and every
+name, version, time and commit in the plan comes from the feed or from
+evidence. The event recommendation names the author and the first steps, and
+the "investigation completed" notification adds "Caused by <author>". Because
+the Analytics Agent records only its top anomalies, `recovered` can miss a
+small later drop; it is a check on the evidence the run has, not a new test.
+
 **The LLM is optional and narrow.** `packages/llm-py` (`helix_llm`) wraps
 Claude (default model `claude-opus-5-5`, structured JSON outputs, server-side
 refusal fallbacks). It is used only when `ANTHROPIC_API_KEY` is set and

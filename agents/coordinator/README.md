@@ -67,6 +67,10 @@ CoordinatorAgent(
    - Recommendations: Phase 5 rules plus segment topSlice ("Investigate the web
      channel on <day>", HIGH), event alignment ("Review the <service> <version>
      deploy", CRITICAL when keywordMatch and rolled back), refund co-anomalies.
+     When the root cause's trigger is a deploy (not a revert), the ranking
+     evidence carries `culprit` and a rules-based `fixPlan` (`fix_plan.py`) and
+     that deploy's recommendation becomes "Fix the <service> <version> change
+     (caused by <author>)" with the first fix steps (CRITICAL).
    - Summary: rules writer leading with the root cause; with an `llm`, an LLM
      writer whose output is rejected (back to rules) if any number in it does not
      appear in the findings, recommendations or evidence formatted values.

@@ -17,7 +17,9 @@ Each candidate is enriched with the evidence that explains the same day:
   non-null topSlice; s = max(concentration), clipped to [0, 1].
 - event (e): `event_alignment` evidence with the same date; the event with a
   keywordMatch is preferred, then the highest confidence; e = its confidence
-  (the Product Agent already folds keyword relevance into it).
+  (the Product Agent already folds keyword relevance into it). The statement
+  names who shipped it ("shipped by <author>") when the feed says so and the
+  event is not a revert; `eventEvidenceId` records which event was chosen.
 - co-anomaly (c): `co_anomaly` evidence, or `anomaly` evidence on another
   metric, dated within 1 day of the anchor; c = max(confidence).
 - correlation: `correlation` evidence linking the anchor metric to a
@@ -78,6 +80,8 @@ class RootCauseCandidate(BaseModel):
         default_factory=list, alias="contributingEvidenceIds"
     )
     anomaly_evidence_id: UUID | None = Field(default=None, alias="anomalyEvidenceId")
+    #: The `event_alignment` evidence chosen as the trigger, if any.
+    event_evidence_id: UUID | None = Field(default=None, alias="eventEvidenceId")
     #: Display strings for every number quoted in `statement`.
     formatted: dict[str, str] = Field(default_factory=dict)
 
@@ -207,6 +211,7 @@ def _candidate(
         contributingFindingIds=finding_ids,
         contributingEvidenceIds=evidence_ids,
         anomalyEvidenceId=anchor.id,
+        eventEvidenceId=event.id if event is not None else None,
         formatted=formatted,
     )
 
@@ -385,18 +390,30 @@ def _event_text(event: RunEvidence, formatted: dict[str, str]) -> str:
         suffix = " (later rolled back)"
     elif status in ("failed", "failure"):
         suffix = " (the deploy failed)"
+    author = event_author(event)
+    shipped = f", shipped by {author}" if author and not _is_revert(event) else ""
 
     if data.get("sameDay") or _num(data.get("hoursBefore")) <= 0:
         at = f" at {clock}" if clock else ""
-        return f", starting shortly after the {name} deploy{at}{suffix}"
+        return f", starting shortly after the {name} deploy{at}{suffix}{shipped}"
     hours = _num(data.get("hoursBefore"))
     hours_text = f"{hours:.1f}"
     formatted["hoursBefore"] = hours_text
     on = f" on {when.date().isoformat()}" if when else ""
     at = f" at {clock}{on}" if clock else on
     return (
-        f", following the {name} deploy{at}{suffix}, {hours_text} hours before that day began"
+        f", following the {name} deploy{at}{suffix}, {hours_text} hours before that day "
+        f"began{shipped}"
     )
+
+
+def event_author(event: RunEvidence) -> str | None:
+    """Who shipped the event: the Product Agent's `change.author`, else the raw label."""
+    change = event.data.get("change") if isinstance(event.data.get("change"), dict) else {}
+    labels = (event.data.get("event") or {}).get("labels") or {}
+    author = change.get("author") or labels.get("author")
+    text = str(author).strip() if author is not None else ""
+    return text or None
 
 
 # ---------------------------------------------------------------------------

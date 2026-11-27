@@ -27,9 +27,11 @@ def test_ground_truth_root_cause():
     assert top.statement == (
         "Revenue dropped 40.0% on Thursday 2026-10-08 because web orders collapsed "
         "(channel = web explains 94.8% of the $13,174.00 shortfall), starting shortly after "
-        "the web-checkout v2.14.0 deploy at 08:40 UTC (later rolled back); refunds also "
-        "spiked on 2026-10-08 and 2026-10-09. Customer segment mix was ruled out as the driver."
+        "the web-checkout v2.14.0 deploy at 08:40 UTC (later rolled back), shipped by carla.m; "
+        "refunds also spiked on 2026-10-08 and 2026-10-09. Customer segment mix was ruled out "
+        "as the driver."
     )
+    assert top.event_evidence_id == by_kind(evidence, "event_alignment")[0].id
     assert top.score >= 0.75
     assert top.score == score_components(0.999, 0.96, 1.0, 0.999)
     assert top.components == {"anomaly": 0.999, "segment": 0.96, "event": 1.0,
@@ -123,7 +125,27 @@ def test_spike_and_hours_before_wording():
     findings, evidence = collect(results, agents=("ANALYTICS", "PRODUCT"))
     [top] = rank_root_causes(findings, evidence)
     assert ("following the web-checkout v2.14.0 deploy at 18:00 UTC on 2026-10-07 "
-            "(the deploy failed), 6.0 hours before that day began") in top.statement
+            "(the deploy failed), 6.0 hours before that day began, shipped by carla.m"
+            ) in top.statement
+
+
+def test_no_author_no_shipped_by_suffix():
+    results = orders_ground_truth()
+    data = results["PRODUCT"]["evidence"][0]["data"]
+    data["change"]["author"] = None
+    del data["event"]["labels"]["author"]
+    findings, evidence = collect(results, agents=("ANALYTICS", "PRODUCT"))
+    [top] = rank_root_causes(findings, evidence)
+    assert "shipped by" not in top.statement
+    assert "deploy at 08:40 UTC (later rolled back)." in top.statement
+
+
+def test_author_from_labels_when_change_is_missing():
+    results = orders_ground_truth()
+    del results["PRODUCT"]["evidence"][0]["data"]["change"]
+    findings, evidence = collect(results, agents=("ANALYTICS", "PRODUCT"))
+    [top] = rank_root_causes(findings, evidence)
+    assert "(later rolled back), shipped by carla.m." in top.statement
 
 
 def test_order_volume_breakdown_does_not_explain_a_refund_spike():
@@ -153,6 +175,22 @@ def test_revert_is_not_chosen_as_the_trigger():
     findings, evidence = collect(results, agents=("ANALYTICS", "PRODUCT"))
     [top] = rank_root_causes(findings, evidence)
     assert "v2.14.0" in top.statement and "v2.14.1" not in top.statement
+    assert top.event_evidence_id == uuid_of(real)
+
+
+def test_only_a_revert_is_never_called_shipped_by():
+    results = orders_ground_truth()
+    labels = results["PRODUCT"]["evidence"][0]["data"]["event"]["labels"]
+    labels.update(version="v2.14.1", description="Revert payment form changes", status="success")
+    findings, evidence = collect(results, agents=("ANALYTICS", "PRODUCT"))
+    [top] = rank_root_causes(findings, evidence)
+    assert "v2.14.1 deploy" in top.statement and "shipped by" not in top.statement
+
+
+def uuid_of(item: dict):
+    from uuid import UUID
+
+    return UUID(item["id"])
 
 
 def test_share_over_one_is_worded_without_a_percentage_over_100():

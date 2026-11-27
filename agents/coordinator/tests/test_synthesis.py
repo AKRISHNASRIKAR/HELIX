@@ -42,8 +42,9 @@ async def test_ground_truth_root_cause(multi_request):
     assert root.statement == (
         "Revenue dropped 40.0% on Thursday 2026-10-08 because web orders collapsed "
         "(channel = web explains 94.8% of the $13,174.00 shortfall), starting shortly after "
-        "the web-checkout v2.14.0 deploy at 08:40 UTC (later rolled back); refunds also "
-        "spiked on 2026-10-08 and 2026-10-09. Customer segment mix was ruled out as the driver."
+        "the web-checkout v2.14.0 deploy at 08:40 UTC (later rolled back), shipped by carla.m; "
+        "refunds also spiked on 2026-10-08 and 2026-10-09. Customer segment mix was ruled out "
+        "as the driver."
     )
     assert root.confidence >= 0.75
     assert root.confidence == 0.949
@@ -71,14 +72,18 @@ async def test_ground_truth_root_cause(multi_request):
 
     # Recommendations: web channel and deploy first, refund audits, linked findings.
     titles = [(r.priority, r.title) for r in result.recommendations]
-    assert titles[0] == ("CRITICAL", "Review the web-checkout v2.14.0 deploy")
+    assert titles[0] == ("CRITICAL", "Fix the web-checkout v2.14.0 change (caused by carla.m)")
     assert ("HIGH", "Investigate the web channel on 2026-10-08") in titles
     assert ("HIGH", "Investigate the refund spike on 2026-10-08") in titles
     assert ("HIGH", "Investigate the refund spike on 2026-10-09") in titles
     assert ("HIGH", "Investigate the revenue drop on 2026-10-08") in titles
     deploy = result.recommendations[0]
-    assert "confirm the rollback fixed it" in deploy.description.lower()
-    assert "checkout success-rate alert" in deploy.description
+    assert deploy.description.startswith(
+        "web-checkout v2.14.0, shipped by carla.m at 08:40 UTC on 2026-10-08, is the most likely "
+        "trigger of the revenue anomaly. It has since been rolled back. Fix plan: "
+        "1. Rollback is in place. 2. Confirm revenue is back to normal. "
+        "3. Fix the change before re-shipping."
+    )
     finding_ids = {f.id for f in result.findings}
     for rec in result.recommendations:
         assert rec.finding_ids and all(i in finding_ids for i in rec.finding_ids)
@@ -171,7 +176,7 @@ async def test_llm_summary_accepted_when_numbers_are_grounded(multi_request):
     assert result.meta["llmModel"] == "fake-opus"
     prompt = llm.calls[1]["user"]
     assert "Root cause (confidence 94.9%): Revenue dropped 40.0%" in prompt
-    assert "- Review the web-checkout v2.14.0 deploy" in prompt
+    assert "- Fix the web-checkout v2.14.0 change (caused by carla.m)" in prompt
     assert llm.calls[1]["schema"]["required"] == ["summary"]
 
 

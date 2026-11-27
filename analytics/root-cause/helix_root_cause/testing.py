@@ -15,6 +15,8 @@ from uuid import uuid4
 
 COLLECTED_AT = datetime(2026, 10, 15, tzinfo=UTC).isoformat()
 DAY = "2026-10-08"
+#: Commit of the web-checkout v2.14.0 deploy in tests/fixtures/deployments.json.
+SHA = "343a48d880ed31ac353bd850add2f5345d5a5516"
 
 
 def _evidence(task_id: str, kind_data: dict[str, Any], *, source_type: str, summary: str,
@@ -62,6 +64,9 @@ def analytics_result(task_id: str) -> dict[str, Any]:
     kpi = _evidence(task_id, {
         "kind": "kpi", "metricKey": "revenue", "metricName": "revenue", "unit": "USD",
         "changePercent": -13.9,
+        "window": {"currentStart": "2026-10-08T00:00:00Z", "currentEnd": "2026-10-14T00:00:00Z",
+                   "previousStart": "2026-10-01T00:00:00Z",
+                   "previousEnd": "2026-10-07T00:00:00Z"},
         "formatted": {"value": "$1,204,331.25", "baseline": "$1,398,120.50",
                       "changePercent": "13.9%", "period": "the 7 days ending 2026-10-14"},
     }, source_type="METRIC", summary="Revenue KPI", confidence=0.988)
@@ -190,8 +195,26 @@ def product_result(task_id: str) -> dict[str, Any]:
         "kind": "event_alignment", "metricKey": "revenue", "metricName": "revenue",
         "unit": "USD", "date": DAY, "anomalyTimestamp": f"{DAY}T00:00:00+00:00",
         "event": {"time": f"{DAY}T08:40:00+00:00", "labels": {
-            "service": "web-checkout", "version": "v2.14.0", "environment": "production",
-            "description": "New checkout flow", "status": "rolled_back", "author": "ci-bot"}},
+            "id": "dep_0038", "service": "web-checkout", "version": "v2.14.0",
+            "environment": "production",
+            "description": "New payment form and address validation for web checkout",
+            "status": "rolled_back", "author": "carla.m", "commit_sha": SHA}},
+        "change": {
+            "id": "dep_0038", "author": "carla.m", "service": "web-checkout",
+            "version": "v2.14.0", "environment": "production", "status": "rolled_back",
+            "description": "New payment form and address validation for web checkout",
+            "commitSha": SHA, "commitUrl": None, "deployedAt": f"{DAY}T08:40:00Z",
+        },
+        "history": {
+            "previous": {"version": "v2.13.0", "author": "emeka.o",
+                         "deployedAt": "2026-10-02T12:05:00Z", "status": "success",
+                         "commitSha": "f1c169dd838ebb3f8924a12e40d4197a57b28ab3"},
+            "rollback": {"version": "v2.14.1", "author": "carla.m",
+                         "deployedAt": "2026-10-09T06:15:00Z",
+                         "description": "Revert payment form changes",
+                         "commitSha": "0b82c07cac7b2a5dcf21773325e032421bcdb45f"},
+        },
+        "revert": False,
         "hoursBefore": -8.67, "sameDay": True, "keywordMatch": ["web", "checkout"],
         "formatted": {"time": "08:40 UTC on Thursday 2026-10-08", "hoursBefore": "0"},
     }, source_type="API_RESPONSE", summary="web-checkout v2.14.0 deploy on 2026-10-08",

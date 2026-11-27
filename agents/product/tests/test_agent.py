@@ -1,3 +1,4 @@
+import json
 import math
 from uuid import uuid4
 
@@ -89,7 +90,7 @@ async def test_orders_scenario_web_checkout_deploy_aligned(engine):
         direction="drop", upstream_evidence=[UPSTREAM_SEGMENT],
     )))
     assert done.status == AgentTaskStatus.SUCCEEDED, done.error
-    assert engine.paths() == ["/events/align"]
+    assert engine.paths() == ["/events/align", "/events/align"]
     body = engine.requests[0][1]
     assert body["targets"] == [{"date": "2026-10-08", "label": "revenue drop"}]
     assert body["windowHoursBefore"] == 24 and body["windowHoursAfter"] == 24
@@ -145,7 +146,7 @@ async def test_no_events_table_succeeds_with_zero_findings(engine):
 async def test_no_focus_falls_back_to_detection_on_tabular_sources(engine):
     done = await _agent(engine).execute(_task(assembled_context("PRODUCT", _sources())))
     assert done.status == AgentTaskStatus.SUCCEEDED
-    assert engine.paths() == ["/anomalies/detect", "/events/align"]
+    assert engine.paths() == ["/anomalies/detect", "/events/align", "/events/align"]
     assert engine.requests[0][1]["dataset"]["table"] == "orders"
     assert engine.requests[1][1]["targets"][0]["date"] == "2026-10-08"
     assert done.result["plan"]["focusSource"] == "detected"
@@ -166,7 +167,7 @@ async def test_failed_deploy_statement(engine, monkeypatch):
     from helix_agent_analytics import testing
 
     rows = [dict(row) for row in testing.DEPLOYMENTS]
-    rows[1]["status"] = "failed"
+    next(r for r in rows if r["version"] == "v2.14.0")["status"] = "failed"
     monkeypatch.setattr(testing, "DEPLOYMENTS", rows)
     done = await _agent(engine).execute(_task(assembled_context(
         "PRODUCT", _sources(), focus_dates=["2026-10-08"], direction="drop",
@@ -203,3 +204,100 @@ def test_reverts_are_down_weighted_as_responses_not_causes():
     assert fix == round(cause * REVERT_FACTOR, 4)
     # The day-before deploy outranks a same-day revert.
     assert event_confidence(15.3, False, ["web"]) > fix
+
+
+async def test_change_and_same_service_history(engine):
+    sources = _sources()
+    done = await _agent(engine).execute(_task(assembled_context(
+        "PRODUCT", sources, focus_dates=["2026-10-08"], direction="drop",
+        upstream_evidence=[UPSTREAM_SEGMENT],
+    )))
+    assert done.status == AgentTaskStatus.SUCCEEDED, done.error
+    # One extra events query, filtered to the services of the recorded events.
+    history_body = engine.requests[1][1]
+    assert history_body["events"]["filter"] == {
+        "column": "service", "op": "in", "value": ["search", "web-checkout"],
+    }
+    assert history_body["windowHoursBefore"] == 24 * 365
+    assert history_body["targets"] == [{"date": "2026-10-08", "label": "deploy history"}]
+
+    data = done.result["evidence"][0]["data"]
+    assert data["change"] == {
+        "id": "dep_0032", "author": "marco", "service": "web-checkout", "version": "v2.14.0",
+        "environment": "production", "status": "rolled_back",
+        "description": "New payment form and address validation for web checkout",
+        "commitSha": "9f3a2d1", "commitUrl": None, "deployedAt": "2026-10-08T08:40:00Z",
+    }
+    assert data["history"] == {
+        "previous": {"version": "v2.13.0", "author": "emeka",
+                     "deployedAt": "2026-10-02T12:05:00Z", "status": "success",
+                     "commitSha": "f1c169d"},
+        "rollback": {"version": "v2.14.1", "author": "marco",
+                     "deployedAt": "2026-10-09T06:15:00Z",
+                     "description": "Revert payment form changes", "commitSha": "c71e5b8"},
+    }
+    # Existing keys stay as they were.
+    assert data["event"]["labels"]["author"] == "marco" and data["revert"] is False
+    # search has no other deploys in the feed: nothing to roll back to.
+    search = done.result["evidence"][1]["data"]
+    assert search["history"] == {"previous": None, "rollback": None}
+    assert any("deploy history of search and web-checkout" in r
+               for r in done.result["plan"]["reasoning"])
+    assert_numbers_backed(done.result)
+
+
+async def test_history_lookup_failure_keeps_alignment(engine, monkeypatch):
+    import httpx
+
+    original = engine._handle
+
+    def flaky(request):
+        body = json.loads(request.content or b"{}")
+        if (body.get("events") or {}).get("filter"):
+            return httpx.Response(500, json={"detail": "boom"})
+        return original(request)
+
+    monkeypatch.setattr(engine, "_handle", flaky)
+    done = await _agent(engine).execute(_task(assembled_context(
+        "PRODUCT", _sources(), focus_dates=["2026-10-08"], direction="drop",
+    )))
+    assert done.status == AgentTaskStatus.SUCCEEDED, done.error
+    data = done.result["evidence"][0]["data"]
+    assert data["history"] is None
+    assert data["change"]["author"] == "marco"
+    assert any(r.startswith("Deploy history lookup skipped") for r in
+               done.result["plan"]["reasoning"])
+
+
+def test_deploy_history_rules():
+    from helix_agent_product.agent import change_from_event, commit_url, deploy_history
+
+    def ev(time, version, status="success", description="x", env="production", **extra):
+        return {"time": time, "labels": {"service": "api", "version": version,
+                                         "status": status, "description": description,
+                                         "environment": env, **extra}}
+
+    cause = ev("2026-10-08T08:00:00Z", "v3", status="success", description="New thing")
+    history = deploy_history(cause, [
+        ev("2026-10-01T08:00:00Z", "v1"),
+        ev("2026-10-03T08:00:00Z", "v2-bad", status="failed"),
+        ev("2026-10-05T08:00:00Z", "v2-rb", status="rolled_back"),
+        ev("2026-10-06T08:00:00Z", "v2-staging", env="staging"),
+        cause,
+        ev("2026-10-09T08:00:00Z", "v4", description="Unrelated feature"),
+    ])
+    # Failed, rolled back and other-environment deploys are not roll-back targets.
+    assert history["previous"]["version"] == "v1"
+    # The next deploy is neither a revert nor following a rolled-back deploy.
+    assert history["rollback"] is None
+
+    hotfix = deploy_history(cause, [cause, ev("2026-10-09T08:00:00Z", "v3.1",
+                                              description="Hotfix for new thing")])
+    assert hotfix["rollback"]["version"] == "v3.1" and hotfix["previous"] is None
+
+    assert commit_url({"commit_sha": "abc", "repo_url": "https://git.example/acme/api/"}) == (
+        "https://git.example/acme/api/commit/abc"
+    )
+    assert commit_url({"commit_sha": "abc", "repo": "acme/api"}) is None
+    change = change_from_event({"time": "2026-10-08T08:00:00Z", "labels": {"version": "v3"}})
+    assert change["author"] is None and change["deployedAt"] == "2026-10-08T08:00:00Z"

@@ -356,6 +356,17 @@ def correlation_response(body: dict[str, Any]) -> dict[str, Any]:
 #: Deployments around the 2026-10-08 incident (build spec section 7.1).
 DEPLOYMENTS: list[dict[str, Any]] = [
     {
+        "id": "dep_0029",
+        "service": "web-checkout",
+        "version": "v2.13.0",
+        "environment": "production",
+        "deployed_at": "2026-10-02T12:05:00Z",
+        "author": "emeka",
+        "description": "Improve coupon code error messages",
+        "status": "success",
+        "commit_sha": "f1c169d",
+    },
+    {
         "id": "dep_0031",
         "service": "search",
         "version": "v5.3.2",
@@ -398,11 +409,19 @@ def events_align_response(body: dict[str, Any]) -> dict[str, Any]:
     label_columns = events_spec.get("labelColumns")
     before = float(body.get("windowHoursBefore", 24))
     after = float(body.get("windowHoursAfter", 24))
+    spec = events_spec.get("filter")
+    rows = DEPLOYMENTS
+    if spec:
+        values = spec["value"] if spec["op"] == "in" else [spec["value"]]
+        keep = [str(row.get(spec["column"])) in {str(v) for v in values} for row in rows]
+        if spec["op"] == "neq":
+            keep = [not k for k in keep]
+        rows = [row for row, k in zip(rows, keep, strict=True) if k]
     matches = []
     for target in body.get("targets") or []:
         day = datetime.fromisoformat(f"{target['date']}T00:00:00+00:00")
         found = []
-        for row in DEPLOYMENTS:
+        for row in rows:
             when = datetime.fromisoformat(row[time_column].replace("Z", "+00:00"))
             hours_before = (day - when).total_seconds() / 3600
             if not (-(24 + after) < hours_before <= before):
