@@ -11,6 +11,9 @@ import { formatCell, formatNumber, formatPercent, formatRelative } from '../../.
 import { formatDate } from '../../../../lib/investigations';
 import { Panel } from '../../../../components/panel';
 import { EmptyState, Notice, PageHeader, linkClass } from '../../../../components/ui';
+import { MotionRow, ShareBar } from '../../../../components/brand/motion-row';
+import { SourceTile } from '../../../../components/brand/source-icon';
+import { Reveal } from '../../../../components/motion';
 import { SourceActions } from './source-actions';
 
 export const metadata = { title: 'Data source · HELIX' };
@@ -54,7 +57,8 @@ export default async function DataSourceDetailPage({
       <PageHeader
         eyebrow={TYPE_EYEBROW[source.type] ?? source.type}
         title={
-          <span className="flex flex-wrap items-center gap-3">
+          <span className="flex flex-wrap items-center gap-4">
+            <SourceTile type={source.type} status={source.status} size="lg" />
             {source.name}
             <DataSourceStatusPill status={source.status} />
           </span>
@@ -86,7 +90,7 @@ export default async function DataSourceDetailPage({
         </Panel>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
-          <Panel title="Tables" className="!p-3 lg:self-start">
+          <Panel title="Tables" subtitle="Pick one to inspect" className="!p-3 lg:sticky lg:top-6 lg:self-start">
             <nav aria-label="Tables">
               <ul className="space-y-0.5">
                 {schemas.map((t) => {
@@ -97,10 +101,10 @@ export default async function DataSourceDetailPage({
                         href={`/data-sources/${source.id}?table=${encodeURIComponent(t.tableName)}`}
                         aria-current={active ? 'true' : undefined}
                         scroll={false}
-                        className={`flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--series-1)] ${
+                        className={`relative flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${
                           active
-                            ? 'bg-[var(--canvas)] font-medium text-[var(--text-primary)]'
-                            : 'text-[var(--text-secondary)] hover:bg-[var(--canvas)]'
+                            ? 'bg-[var(--surface-2)] font-medium text-[var(--text-primary)] shadow-[inset_2px_0_0_var(--accent)]'
+                            : 'text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]'
                         }`}
                       >
                         <span className="truncate font-mono text-[13px]">{t.tableName}</span>
@@ -114,7 +118,11 @@ export default async function DataSourceDetailPage({
               </ul>
             </nav>
           </Panel>
-          {selected && <TableDetail sourceId={source.id} table={selected} />}
+          {selected && (
+            <Reveal key={selected.tableName} className="min-w-0">
+              <TableDetail sourceId={source.id} table={selected} />
+            </Reveal>
+          )}
         </div>
       )}
 
@@ -166,15 +174,15 @@ async function TableDetail({ sourceId, table }: { sourceId: string; table: Disco
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--grid)]">
-              {table.columns.map((c) => {
+              {table.columns.map((c, i) => {
                 const s = stats.get(c.name);
                 return (
-                  <tr key={c.name}>
+                  <MotionRow key={c.name} index={i} className="transition-colors hover:bg-[var(--surface-2)]">
                     <td className="px-5 py-2 font-mono text-[13px]">{c.name}</td>
                     <td className="px-3 py-2 font-mono text-xs text-[var(--text-secondary)]">{c.type}</td>
                     <td className="px-3 py-2">
                       {c.semanticType ?? s?.semanticType ? (
-                        <span className="rounded bg-[var(--canvas)] px-1.5 py-0.5 text-xs text-[var(--text-secondary)]">
+                        <span className="rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--text-secondary)]">
                           {c.semanticType ?? s?.semanticType}
                         </span>
                       ) : (
@@ -183,12 +191,19 @@ async function TableDetail({ sourceId, table }: { sourceId: string; table: Disco
                     </td>
                     <td className="px-3 py-2 text-xs text-[var(--text-secondary)]">{c.nullable ? 'yes' : 'no'}</td>
                     <td className="px-3 py-2 text-right text-xs tabular-nums text-[var(--text-secondary)]">
-                      {s ? formatPercent(s.nullRate) : '-'}
+                      {s ? (
+                        <span className="inline-flex items-center justify-end gap-2">
+                          <ShareBar value={s.nullRate} />
+                          {formatPercent(s.nullRate)}
+                        </span>
+                      ) : (
+                        '-'
+                      )}
                     </td>
                     <td className="px-5 py-2 text-right text-xs tabular-nums text-[var(--text-secondary)]">
                       {s ? formatNumber(s.distinctCount) : '-'}
                     </td>
-                  </tr>
+                  </MotionRow>
                 );
               })}
             </tbody>
@@ -215,7 +230,7 @@ async function TableDetail({ sourceId, table }: { sourceId: string; table: Disco
               </thead>
               <tbody className="divide-y divide-[var(--grid)]">
                 {preview.data.rows.map((row, i) => (
-                  <tr key={i} className="hover:bg-[var(--canvas)]">
+                  <MotionRow key={i} index={i} step={0.015} className="transition-colors hover:bg-[var(--surface-2)]">
                     {preview.data.columns.map((col) => {
                       const value = row[col];
                       return (
@@ -230,7 +245,7 @@ async function TableDetail({ sourceId, table }: { sourceId: string; table: Disco
                         </td>
                       );
                     })}
-                  </tr>
+                  </MotionRow>
                 ))}
               </tbody>
             </table>

@@ -11,12 +11,12 @@ export default async function OnboardingPage() {
   const me = await getMe();
   const hasOrg = (me?.memberships.length ?? 0) > 0;
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <div>
-        <p className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
+        <p className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--text-muted)]">
           {hasOrg ? 'New organization' : 'Step 1 of 1'}
         </p>
-        <h1 className="mt-1 text-lg font-semibold tracking-tight">Set up your workspace</h1>
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Set up your workspace</h1>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
           Create an organization (you will be its owner) and a first project for your investigations.
         </p>

@@ -1,29 +1,47 @@
-import { getAgents, isDemoMode } from '../../../lib/api';
-import { normalizeContextRequirements, requirementRows, sortAgents } from '../../../lib/agents';
-import { formatPercent } from '../../../lib/format';
-import { formatMs } from '../../../lib/trace';
+import { getAgents, isDemoMode, type AgentSummary } from '../../../lib/api';
+import { humanizeCapability, normalizeContextRequirements, requirementChips, sortAgents } from '../../../lib/agents';
 import { Panel } from '../../../components/panel';
 import { EmptyState, Notice, PageHeader } from '../../../components/ui';
+import { LiveDot, Reveal, SpotlightCard, Stagger } from '../../../components/motion';
+import { AgentGlyph } from '../../../components/brand/agent-glyph';
+import { AgentFlow } from './agent-flow';
+import { AgentStats } from './agent-stats';
 
 export const metadata = { title: 'Agents · HELIX' };
 
-const UNAVAILABLE = { dot: 'bg-[var(--status-critical)]', label: 'Unavailable' };
-const STATUS_STYLE: Record<string, { dot: string; label: string }> = {
-  BUSY: { dot: 'bg-[var(--series-1)]', label: 'Busy' },
-  IDLE: { dot: 'bg-[var(--status-good)]', label: 'Idle' },
-  UNAVAILABLE,
+const STATUS: Record<AgentSummary['status'], { label: string; tone: 'accent' | 'bad' | 'good' | null }> = {
+  BUSY: { label: 'Working', tone: 'accent' },
+  IDLE: { label: 'Ready', tone: null },
+  UNAVAILABLE: { label: 'Unavailable', tone: 'bad' },
+};
+
+const STEP: Record<string, string> = {
+  COORDINATOR: 'Steps 1 and 4',
+  ANALYTICS: 'Step 2',
+  FINANCE: 'Step 3',
+  CUSTOMER: 'Step 3',
+  PRODUCT: 'Step 3',
 };
 
 export default async function AgentsPage() {
   const agents = await getAgents();
   const sorted = agents ? sortAgents(agents) : [];
+  const online = sorted.filter((a) => a.status !== 'UNAVAILABLE').length;
 
   return (
     <main className="space-y-6">
       <PageHeader
         eyebrow="Agents"
         title="Agent registry"
-        description="The Coordinator plans each investigation and delegates to these specialist agents. Each one declares the context it needs; the Context Engine assembles exactly that before every task."
+        description="Five specialists, one investigation. Each agent asks for exactly the context it needs, and the Context Engine assembles it before every task."
+        actions={
+          agents && agents.length > 0 ? (
+            <span className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-xs text-[var(--text-secondary)]">
+              <LiveDot tone={online === sorted.length ? 'good' : 'bad'} />
+              {online} of {sorted.length} online
+            </span>
+          ) : undefined
+        }
       />
 
       {agents === null ? (
@@ -33,80 +51,121 @@ export default async function AgentsPage() {
           <EmptyState title="No agents registered">The agent runtime has not reported any agents yet.</EmptyState>
         </Panel>
       ) : (
-        <ul className="grid gap-4 lg:grid-cols-2" aria-label="Agents">
-          {sorted.map((a) => {
-            const status = STATUS_STYLE[a.status] ?? UNAVAILABLE;
-            const req = requirementRows(normalizeContextRequirements(a.contextRequirements));
-            const capabilities = a.capabilities ?? [];
-            return (
-              <li key={a.type}>
-                <Panel className="h-full">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h2 className="text-base font-semibold tracking-tight">{a.name}</h2>
-                      <p className="mt-0.5 font-mono text-[11px] text-[var(--text-muted)]">
-                        {a.type}
-                        {a.version ? ` · v${a.version.replace(/^v/, '')}` : ''}
-                      </p>
-                    </div>
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] px-2.5 py-0.5 text-xs font-medium text-[var(--text-secondary)]">
-                      <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} aria-hidden />
-                      {status.label}
-                    </span>
+        <>
+          <Reveal>
+            <section className="helix-beam rounded-2xl">
+              <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-lg)] sm:p-6">
+                <div className="helix-dots pointer-events-none absolute inset-0 opacity-50" aria-hidden />
+                <div className="relative">
+                  <h2 className="text-sm font-semibold">How an investigation flows</h2>
+                  <p className="mt-0.5 text-xs text-[var(--text-muted)]">Every question or monitor alert follows this path.</p>
+                  <div className="mt-5">
+                    <AgentFlow agents={sorted.map((a) => ({ type: a.type, name: a.name, status: a.status }))} />
                   </div>
-                  {a.description && <p className="mt-2 text-[13px] text-[var(--text-secondary)]">{a.description}</p>}
+                </div>
+              </div>
+            </section>
+          </Reveal>
 
-                  <dl className="mt-4 grid grid-cols-3 gap-2 rounded-lg bg-[var(--canvas)] p-3 text-center">
-                    {[
-                      ['Tasks', String(a.tasks)],
-                      ['Success', a.successRate == null ? '-' : formatPercent(a.successRate, 0)],
-                      ['Avg duration', formatMs(a.avgMs) ?? '-'],
-                    ].map(([label, value]) => (
-                      <div key={label}>
-                        <dt className="text-[11px] text-[var(--text-muted)]">{label}</dt>
-                        <dd className="mt-0.5 text-sm font-semibold tabular-nums">{value}</dd>
-                      </div>
-                    ))}
-                  </dl>
-
-                  <h3 className="mt-4 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Capabilities</h3>
-                  {capabilities.length === 0 ? (
-                    <p className="mt-1 text-xs text-[var(--text-muted)]">
-                      {a.status === 'UNAVAILABLE' ? 'Unknown while the runtime is unreachable.' : 'None declared.'}
-                    </p>
-                  ) : (
-                    <ul className="mt-1.5 space-y-1.5">
-                      {capabilities.map((c) => (
-                        <li key={c.name} className="text-[13px]">
-                          <span className="rounded bg-[var(--canvas)] px-1.5 py-0.5 font-mono text-xs">{c.name}</span>
-                          {c.description && <span className="ml-2 text-[var(--text-secondary)]">{c.description}</span>}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-
-                  <h3 className="mt-4 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-                    Context requirements
-                  </h3>
-                  {req.length === 0 ? (
-                    <p className="mt-1 text-xs text-[var(--text-muted)]">Not reported by the runtime.</p>
-                  ) : (
-                    <dl className="mt-1.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-[13px]">
-                      {req.map((r) => (
-                        <div key={r.label} className="contents">
-                          <dt className="text-[var(--text-muted)]">{r.label}</dt>
-                          <dd className="break-words text-[var(--text-secondary)]">{r.value}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  )}
-                </Panel>
-              </li>
-            );
-          })}
-        </ul>
+          <Stagger as="ul" className="grid gap-4 lg:grid-cols-2" step={0.08}>
+            {sorted.map((a) => (
+              <AgentCard key={a.type} agent={a} />
+            ))}
+          </Stagger>
+        </>
       )}
       {isDemoMode() && <p className="text-xs text-[var(--text-muted)]">Demo mode: agent data comes from fixtures.</p>}
     </main>
+  );
+}
+
+function AgentCard({ agent: a }: { agent: AgentSummary }) {
+  const status = STATUS[a.status] ?? STATUS.UNAVAILABLE;
+  const groups = requirementChips(normalizeContextRequirements(a.contextRequirements));
+  const capabilities = a.capabilities ?? [];
+  return (
+    <SpotlightCard className="h-full">
+      <article className="p-5">
+        <div className="flex items-start gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[var(--accent)] text-[var(--accent-contrast)] shadow-[0_0_24px_-6px_var(--glow-strong)]">
+            <AgentGlyph type={a.type} className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-semibold tracking-tight">{a.name}</h2>
+              {STEP[a.type] && (
+                <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
+                  {STEP[a.type]}
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 font-mono text-[11px] text-[var(--text-muted)]">
+              {a.type}
+              {a.version ? ` · v${a.version.replace(/^v/, '')}` : ''}
+            </p>
+          </div>
+          <span
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+              a.status === 'UNAVAILABLE'
+                ? 'border-[var(--status-critical)]/40 text-[var(--text-bad)]'
+                : 'border-[var(--border)] text-[var(--text-secondary)]'
+            }`}
+          >
+            {status.tone ? <LiveDot tone={status.tone} /> : <span className="h-2 w-2 rounded-full bg-[var(--text-muted)]" aria-hidden />}
+            {status.label}
+          </span>
+        </div>
+
+        {a.description && <p className="mt-3 text-[13px] leading-relaxed text-[var(--text-secondary)]">{a.description}</p>}
+
+        <div className="mt-4">
+          <AgentStats tasks={a.tasks} successRate={a.successRate} avgMs={a.avgMs} />
+        </div>
+
+        <h3 className="mt-5 text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">What it can do</h3>
+        {capabilities.length === 0 ? (
+          <p className="mt-1.5 text-xs text-[var(--text-muted)]">
+            {a.status === 'UNAVAILABLE' ? 'Unknown while the runtime is unreachable.' : 'None declared.'}
+          </p>
+        ) : (
+          <ul className="mt-2 space-y-2">
+            {capabilities.map((c, i) => (
+              <li key={c.name} className="flex gap-2.5 text-[13px]">
+                <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border border-[var(--border)] font-mono text-[10px] text-[var(--text-muted)]">
+                  {i + 1}
+                </span>
+                <span className="min-w-0">
+                  <span className="font-medium text-[var(--text-primary)]">{humanizeCapability(c.name)}</span>
+                  {c.description && <span className="block text-[var(--text-secondary)]">{c.description}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <h3 className="mt-5 text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">Context it asks for</h3>
+        {groups.length === 0 ? (
+          <p className="mt-1.5 text-xs text-[var(--text-muted)]">Not reported by the runtime.</p>
+        ) : (
+          <dl className="mt-2 space-y-2">
+            {groups.map((g) => (
+              <div key={g.label} className="flex flex-wrap items-baseline gap-1.5">
+                <dt className="w-24 shrink-0 text-[11px] text-[var(--text-muted)]">{g.label}</dt>
+                <dd className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+                  {g.chips.map((chip) => (
+                    <span
+                      key={chip}
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2 py-0.5 font-mono text-[11px] text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
+                    >
+                      {chip}
+                    </span>
+                  ))}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </article>
+    </SpotlightCard>
   );
 }

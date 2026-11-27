@@ -57,3 +57,45 @@ export function sortAgents<T extends Pick<AgentSummary, 'type' | 'name'>>(agents
   };
   return [...agents].sort((a, b) => rank(a.type) - rank(b.type) || a.name.localeCompare(b.name));
 }
+
+/** "kpi_analysis" -> "KPI analysis": capability ids in plain words. */
+export function humanizeCapability(name: string): string {
+  const ACRONYMS = new Set(['kpi', 'a2a', 'llm', 'mcp', 'api', 'sql']);
+  const words = name
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((w) => (ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w.toLowerCase()));
+  const [first, ...rest] = words;
+  if (first === undefined) return name;
+  return [first.charAt(0).toUpperCase() + first.slice(1), ...rest].join(' ');
+}
+
+export interface RequirementChipGroup {
+  label: string;
+  chips: string[];
+}
+
+/**
+ * Groups of short chips describing the context an agent asks for, for the
+ * visual agent cards. Empty lists are left out; flags become one chip each.
+ */
+export function requirementChips(req: AgentContextRequirements | null): RequirementChipGroup[] {
+  if (!req) return [];
+  const groups: RequirementChipGroup[] = [];
+  if (req.dataSourceTypes && req.dataSourceTypes.length > 0) {
+    groups.push({ label: 'Sources', chips: req.dataSourceTypes });
+  }
+  if (req.semanticTypes && req.semanticTypes.length > 0) {
+    groups.push({ label: 'Column types', chips: req.semanticTypes });
+  }
+  if (req.tableKeywords && req.tableKeywords.length > 0) {
+    groups.push({ label: 'Tables about', chips: req.tableKeywords });
+  }
+  const flags: string[] = [];
+  if (req.includeHistory) flags.push(`${req.historyDays ?? 30} days of history`);
+  if (req.includeUpstream) flags.push('earlier agents’ findings');
+  if (req.maxTokens !== undefined) flags.push(`${new Intl.NumberFormat('en-US').format(req.maxTokens)} token budget`);
+  if (flags.length > 0) groups.push({ label: 'Also receives', chips: flags });
+  return groups;
+}

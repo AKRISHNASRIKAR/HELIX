@@ -17,7 +17,7 @@ export function OrgSwitcher({ memberships, activeId }: { memberships: Membership
         name="organizationId"
         defaultValue={activeId}
         onChange={() => formRef.current?.requestSubmit()}
-        className="-ml-1 max-w-full cursor-pointer truncate rounded-md bg-transparent py-0.5 pl-1 pr-1 text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--series-1)]"
+        className="-ml-1 max-w-full cursor-pointer truncate rounded-md bg-transparent py-0.5 transition-colors pl-1 pr-1 text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
       >
         {memberships.map((m) => (
           <option key={m.organizationId} value={m.organizationId}>

@@ -15,10 +15,11 @@ export default async function LoginPage({
   if (isDemoMode()) redirect('/');
   const { next, expired } = await searchParams;
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <div>
-        <h1 className="text-lg font-semibold tracking-tight">Sign in</h1>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">Welcome back to HELIX.</p>
+        <p className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--text-muted)]">Welcome back</p>
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Sign in</h1>
+        <p className="mt-1.5 text-sm text-[var(--text-secondary)]">Pick up where your agents left off.</p>
       </div>
       {expired && <Notice tone="info">Your session ended. Please sign in again.</Notice>}
       <LoginForm next={safeNextPath(next)} />

@@ -64,7 +64,7 @@ export function CsvForm() {
           accept=".csv,text/csv"
           required
           aria-describedby="csv-file-hint"
-          className={`${inputClass} file:mr-3 file:rounded-md file:border-0 file:bg-[var(--canvas)] file:px-2.5 file:py-1 file:text-xs file:font-medium`}
+          className={`${inputClass} file:mr-3 file:rounded-md file:border-0 file:cursor-pointer file:bg-[var(--accent)] file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-[var(--accent-contrast)]`}
         />
       </Field>
       <FormMessage state={state} />

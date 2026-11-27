@@ -33,7 +33,17 @@ export function SubmitButton({
         if (confirmMessage && !window.confirm(confirmMessage)) e.preventDefault();
       }}
     >
-      {pending ? (pendingLabel ?? 'Working...') : children}
+      {pending ? (
+        <>
+          <span
+            className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-r-transparent opacity-80"
+            aria-hidden
+          />
+          {pendingLabel ?? 'Working...'}
+        </>
+      ) : (
+        children
+      )}
     </button>
   );
 }
