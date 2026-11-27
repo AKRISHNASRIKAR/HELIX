@@ -8,12 +8,17 @@ import {
   deriveGraph,
   entityId,
   formatMs,
+  handleInitials,
   messagesForTask,
+  parseCausedBy,
   plannerLabel,
+  readCulprit,
   readSnapshot,
   recommendationFindings,
   snapshotForTask,
   triggerContextRows,
+  utcClock,
+  utcShortDay,
 } from './trace';
 
 const task = (id: string, stepId: string, agentType: string, startedAt: string, completedAt: string, extra: Partial<TraceTask> = {}): TraceTask => ({
@@ -517,5 +522,139 @@ describe('result screen view models', () => {
     const chain = causalChain(layout.edges, 'evidence:e-a');
     expect(chain.has('task:t0') && chain.has('finding:f-root') && chain.has(q.id)).toBe(true);
     expect(chain.has('evidence:e-p')).toBe(false);
+  });
+});
+
+describe('readCulprit', () => {
+  const labels = {
+    id: 'dep_0038',
+    author: 'carla.m',
+    status: 'rolled_back',
+    service: 'web-checkout',
+    version: 'v2.14.0',
+    commit_sha: '343a48d880ed31ac353bd850add2f5345d5a5516',
+    description: 'New payment form and address validation for web checkout',
+    environment: 'production',
+  };
+  const withEvidence = (evidence: InvestigationTrace['evidence']): InvestigationTrace => ({ ...fixture(), evidence });
+  const eventEv = (id: string, time: string, l: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    id,
+    agentTaskId: 't2',
+    sourceType: 'API_RESPONSE',
+    summary: 'deploy',
+    data: { kind: 'event_alignment', event: { time, labels: l }, relevance: 1, revert: false, ...extra },
+    confidence: 1,
+  });
+
+  it('reads the Coordinator culprit and fix plan from the ranking evidence', () => {
+    const trace = withEvidence([
+      eventEv('e-p', '2026-10-08T08:40:00Z', labels),
+      {
+        id: 'e-r',
+        agentTaskId: 't3',
+        sourceType: 'METRIC',
+        summary: 'ranking',
+        confidence: 0.9,
+        data: {
+          kind: 'root_cause_ranking',
+          culprit: {
+            id: 'dep_0038',
+            author: 'carla.m',
+            service: 'web-checkout',
+            version: 'v2.14.0',
+            environment: 'production',
+            status: 'rolled_back',
+            description: 'New payment form',
+            commitSha: '343a48d',
+            commitUrl: 'https://git.example.com/shop/commit/343a48d',
+            deployedAt: '2026-10-08T08:40:00Z',
+            history: {
+              previous: { version: 'v2.13.2', author: 'sam.k', deployedAt: '2026-10-01T09:00:00Z', status: 'success', commitSha: 'aaa' },
+              rollback: { version: 'v2.14.1', author: 'carla.m', deployedAt: '2026-10-09T06:15:00Z', description: 'Revert payment form changes', commitSha: 'bbb' },
+            },
+          },
+          fixPlan: {
+            state: 'rolled_back',
+            recovered: true,
+            recoveredThrough: '2026-10-14',
+            steps: [
+              { kind: 'verify', title: 'Rollback is in place', detail: 'v2.14.1 by carla.m' },
+              { kind: 'bogus', title: 'Unknown kind becomes review', detail: '' },
+              { kind: 'test', detail: 'no title, dropped' },
+            ],
+          },
+        },
+      },
+    ]);
+    const c = readCulprit(trace)!;
+    expect(c.source).toBe('ranking');
+    expect(c.author).toBe('carla.m');
+    expect(c.commitUrl).toBe('https://git.example.com/shop/commit/343a48d');
+    expect(c.history.previous?.version).toBe('v2.13.2');
+    expect(c.history.rollback?.description).toBe('Revert payment form changes');
+    expect(c.fixPlan?.recovered).toBe(true);
+    expect(c.fixPlan?.steps.map((s) => s.kind)).toEqual(['verify', 'review']);
+    expect(c.fixPlan?.steps[1]!.detail).toBeNull();
+  });
+
+  it('falls back to the root cause deploy labels with no fix plan', () => {
+    const trace = withEvidence([
+      eventEv('e-p', '2026-10-08T08:40:00Z', labels),
+      eventEv('e-other', '2026-10-07T15:20:00Z', { author: 'dev.r', service: 'search', version: 'v3.14.0' }, { relevance: 0.4 }),
+      eventEv('e-prev', '2026-10-01T09:00:00Z', { author: 'sam.k', service: 'web-checkout', version: 'v2.13.2', status: 'success' }),
+      eventEv('e-rb', '2026-10-09T06:15:00Z', { author: 'carla.m', service: 'web-checkout', version: 'v2.14.1', status: 'success' }, { revert: true }),
+      { id: 'e-r', agentTaskId: 't3', sourceType: 'METRIC', summary: 'ranking', data: { kind: 'root_cause_ranking' }, confidence: 0.9 },
+    ]);
+    const c = readCulprit(trace)!;
+    expect(c).toMatchObject({
+      source: 'fallback',
+      author: 'carla.m',
+      service: 'web-checkout',
+      version: 'v2.14.0',
+      status: 'rolled_back',
+      commitSha: labels.commit_sha,
+      commitUrl: null,
+      deployedAt: '2026-10-08T08:40:00Z',
+      fixPlan: null,
+    });
+    expect(c.history.previous?.version).toBe('v2.13.2');
+    expect(c.history.rollback?.version).toBe('v2.14.1');
+  });
+
+  it('builds a commit link only from a repo url label', () => {
+    const trace = withEvidence([eventEv('e-p', '2026-10-08T08:40:00Z', { ...labels, repo_url: 'https://git.example.com/shop/' })]);
+    expect(readCulprit(trace)?.commitUrl).toBe(`https://git.example.com/shop/commit/${labels.commit_sha}`);
+  });
+
+  it('is null without a deploy behind the root cause', () => {
+    expect(readCulprit(withEvidence([]))).toBeNull();
+    expect(readCulprit({ ...fixture(), findings: [] })).toBeNull();
+  });
+});
+
+describe('culprit formatting', () => {
+  it('makes initials from a handle', () => {
+    expect(handleInitials('carla.m')).toBe('CM');
+    expect(handleInitials('dev')).toBe('DE');
+    expect(handleInitials('ana_lopez@shop.com')).toBe('AL');
+    expect(handleInitials(null)).toBe('?');
+  });
+
+  it('formats UTC clock and day', () => {
+    expect(utcClock('2026-10-08T08:40:00Z')).toBe('08:40 UTC');
+    expect(utcShortDay('2026-10-08')).toBe('Oct 8');
+    expect(utcClock('nope')).toBeNull();
+  });
+
+  it('parses "Caused by" out of a notification message', () => {
+    expect(parseCausedBy('Root cause found. Caused by carla.m (web-checkout v2.14.0). First step: Roll back.')).toEqual({
+      before: 'Root cause found. ',
+      handle: 'carla.m',
+      detail: 'web-checkout v2.14.0',
+      after: '. First step: Roll back.',
+    });
+    expect(parseCausedBy('Caused by carla.m.')).toEqual({ before: '', handle: 'carla.m', detail: null, after: '.' });
+    expect(parseCausedBy('Revenue dropped 39%.')).toBeNull();
+    expect(parseCausedBy(null)).toBeNull();
   });
 });

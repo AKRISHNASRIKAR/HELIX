@@ -8,6 +8,7 @@ import { useSound } from '../experience';
 import { EASE, LiveDot, motion } from '../motion';
 import { useReducedMotion } from 'motion/react';
 import { AnimatedNumber } from './kpi-card';
+import { CulpritAvatar } from '../culprit';
 
 export interface HeroInvestigation {
   id: string;
@@ -16,6 +17,8 @@ export interface HeroInvestigation {
   why: string | null;
   because: string | null;
   duration: string | null;
+  /** "Caused by carla.m" and the first fix step, read from the investigation trace. */
+  culprit?: { handle: string; change: string; firstStep: string | null } | null;
 }
 
 export interface HeroProps {
@@ -237,6 +240,27 @@ function StoryStrip({ story, investigation }: { story: RevenueStory; investigati
           detail={investigation?.because ?? undefined}
           delay={base + 0.75}
         >
+          {investigation?.culprit && (
+            <motion.div
+              initial={reduce ? false : { opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: base + 1.15, ease: EASE }}
+              className="mt-3 border-t border-[var(--border)] pt-3"
+            >
+              <p className="flex items-center gap-2 text-sm">
+                <CulpritAvatar handle={investigation.culprit.handle} size="sm" ring={false} />
+                <span className="min-w-0 truncate">
+                  <span className="text-[var(--text-bad)]">Caused by</span>{' '}
+                  <span className="font-semibold">{investigation.culprit.handle}</span>
+                </span>
+              </p>
+              {investigation.culprit.firstStep && (
+                <p className="mt-1.5 text-xs leading-snug text-[var(--text-secondary)]">
+                  <span className="font-medium text-[var(--text-primary)]">First step:</span> {investigation.culprit.firstStep}
+                </p>
+              )}
+            </motion.div>
+          )}
           <Link
             href={investigation ? `/investigations/${investigation.id}` : '/investigations#new'}
             className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-[var(--text-primary)] underline-offset-4 hover:underline"

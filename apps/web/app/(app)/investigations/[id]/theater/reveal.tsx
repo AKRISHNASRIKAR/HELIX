@@ -6,6 +6,7 @@ import { buttonClass } from '../../../../../components/ui';
 import { formatMs } from '../../../../../lib/trace';
 import type { Timeline } from '../../../../../lib/theater';
 import { ConfidenceRing } from './confidence-ring';
+import { CulpritReveal } from './culprit-reveal';
 
 /** The climax: root cause statement, confidence ring and What / When / Where / Why tiles. */
 export function Reveal({
@@ -83,6 +84,8 @@ export function Reveal({
           })}
         </div>
       )}
+
+      {timeline.culprit && <CulpritReveal culprit={timeline.culprit} instant={instant} />}
 
       <div className="relative mt-6 flex flex-wrap items-center gap-3">
         <Link href={`/investigations/${investigationId}`} scroll={false} className={buttonClass('primary', 'md')}>

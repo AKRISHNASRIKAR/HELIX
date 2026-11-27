@@ -7,6 +7,7 @@ import {
   getDashboardSummary,
   getDataSources,
   getInvestigation,
+  getInvestigationTrace,
   getInvestigations,
   getMe,
   getMonitors,
@@ -18,6 +19,7 @@ import {
 import { countActive, formatDuration, formatTriggerType } from '../../lib/investigations';
 import { anomalyMetricName, autonomousInvestigations, summarizeMonitors } from '../../lib/monitoring';
 import { formatDelta, formatRelative, formatUtcDay } from '../../lib/format';
+import { culpritChange, readCulprit } from '../../lib/trace';
 import { Panel, SeverityBadge } from '../../components/panel';
 import { AnomalyHeatmap, SegmentBars, ThroughputChart } from '../../components/charts';
 import { RevenueChart } from '../../components/revenue-chart';
@@ -76,7 +78,17 @@ export default async function DashboardPage() {
     ? solved.find((i) => `${i.question} ${i.summary ?? ''}`.includes(story.date))
     : undefined;
   const pick = aboutStory ?? solved[0] ?? null;
-  const detail = pick ? await getInvestigation(pick.id) : null;
+  // The trace carries the culprit ("Caused by carla.m"); fail soft so the hero never waits on it.
+  const [detail, heroTrace] = pick
+    ? await Promise.all([getInvestigation(pick.id), getInvestigationTrace(pick.id).catch(() => null)])
+    : [null, null];
+  const culprit = (() => {
+    try {
+      return heroTrace ? readCulprit(heroTrace) : null;
+    } catch {
+      return null;
+    }
+  })();
   const heroInvestigation: HeroInvestigation | null =
     pick && detail
       ? {
@@ -86,6 +98,10 @@ export default async function DashboardPage() {
           why: storyWhy(detail),
           because: storyBecause(detail),
           duration: formatDuration(pick.startedAt, pick.completedAt),
+          culprit:
+            culprit && culprit.author
+              ? { handle: culprit.author, change: culpritChange(culprit), firstStep: culprit.fixPlan?.steps[0]?.title ?? null }
+              : null,
         }
       : null;
 

@@ -1451,3 +1451,263 @@ export function causalChain(edges: Pick<CausalEdge, 'source' | 'target'>[], id: 
   walk('down');
   return out;
 }
+
+// ------------------------------------------------------------ culprit
+
+export type FixStepKind = 'rollback' | 'verify' | 'review' | 'test' | 'prevent';
+export const FIX_STEP_KINDS: FixStepKind[] = ['rollback', 'verify', 'review', 'test', 'prevent'];
+
+export interface FixStep {
+  kind: FixStepKind;
+  title: string;
+  detail: string | null;
+}
+
+export interface FixPlan {
+  state: 'rolled_back' | 'needs_rollback' | 'failed' | string;
+  recovered: boolean | null;
+  recoveredThrough: string | null;
+  steps: FixStep[];
+}
+
+export interface CulpritDeploy {
+  version: string | null;
+  author: string | null;
+  deployedAt: string | null;
+  status: string | null;
+  description: string | null;
+  commitSha: string | null;
+}
+
+export interface Culprit {
+  id: string | null;
+  author: string | null;
+  service: string | null;
+  version: string | null;
+  environment: string | null;
+  status: string | null;
+  description: string | null;
+  commitSha: string | null;
+  commitUrl: string | null;
+  deployedAt: string | null;
+  history: { previous: CulpritDeploy | null; rollback: CulpritDeploy | null };
+  fixPlan: FixPlan | null;
+  /** 'ranking' = the Coordinator's culprit and fix plan; 'fallback' = derived from the deploy labels. */
+  source: 'ranking' | 'fallback';
+}
+
+const firstString = (r: Record<string, unknown>, ...keys: string[]): string | null => {
+  for (const k of keys) {
+    const v = asString(r[k]);
+    if (v) return v;
+  }
+  return null;
+};
+const httpUrl = (v: string | null): string | null => (v && /^https?:\/\//i.test(v) ? v : null);
+
+function readDeploy(v: unknown): CulpritDeploy | null {
+  if (!isRecord(v)) return null;
+  const d: CulpritDeploy = {
+    version: asString(v.version),
+    author: asString(v.author),
+    deployedAt: firstString(v, 'deployedAt', 'deployed_at', 'time'),
+    status: asString(v.status),
+    description: asString(v.description),
+    commitSha: firstString(v, 'commitSha', 'commit_sha'),
+  };
+  return d.version || d.author || d.deployedAt ? d : null;
+}
+
+function readFixPlan(v: unknown): FixPlan | null {
+  if (!isRecord(v) || !Array.isArray(v.steps)) return null;
+  const steps = v.steps
+    .filter(isRecord)
+    .map((s): FixStep | null => {
+      const title = asString(s.title);
+      if (!title) return null;
+      const kind = asString(s.kind);
+      return {
+        kind: FIX_STEP_KINDS.includes(kind as FixStepKind) ? (kind as FixStepKind) : 'review',
+        title,
+        detail: asString(s.detail),
+      };
+    })
+    .filter((s): s is FixStep => !!s);
+  if (steps.length === 0) return null;
+  return {
+    state: asString(v.state) ?? 'unknown',
+    recovered: typeof v.recovered === 'boolean' ? v.recovered : null,
+    recoveredThrough: asString(v.recoveredThrough),
+    steps,
+  };
+}
+
+/** A repo URL label plus a sha makes a commit link; never guessed otherwise. */
+function commitLink(labels: Record<string, unknown>, sha: string | null): string | null {
+  const direct = httpUrl(firstString(labels, 'commitUrl', 'commit_url'));
+  if (direct) return direct;
+  const repo = httpUrl(firstString(labels, 'repoUrl', 'repo_url', 'repository_url', 'repository'));
+  return repo && sha ? `${repo.replace(/\/+$/, '')}/commit/${sha}` : null;
+}
+
+const BAD_STATUS = /fail|roll|revert|error|abort/i;
+
+/**
+ * Who shipped the change behind the root cause, and how to fix it. Reads the
+ * Coordinator's `culprit` and `fixPlan` on the root_cause_ranking evidence;
+ * older investigations fall back to the labels of the root cause's strongest
+ * event_alignment deploy (no fix plan, history only from deploys in the
+ * trace). Null when the root cause is not tied to a deploy.
+ */
+export function readCulprit(trace: InvestigationTrace): Culprit | null {
+  const root = rootCauseFinding(trace);
+  if (!root) return null;
+  const all = trace.evidence ?? [];
+  const linked = new Set(root.evidenceIds ?? []);
+  const rankings = all.filter((e) => evidenceKind(e) === 'root_cause_ranking');
+  const rankingEv = rankings.find((e) => linked.has(e.id)) ?? rankings[0] ?? null;
+  const rankingData = rankingEv && isRecord(rankingEv.data) ? rankingEv.data : null;
+
+  if (rankingData && isRecord(rankingData.culprit)) {
+    const c = rankingData.culprit;
+    const history = isRecord(c.history) ? c.history : {};
+    const author = asString(c.author);
+    const service = asString(c.service);
+    if (author || service) {
+      const commitSha = firstString(c, 'commitSha', 'commit_sha');
+      return {
+        id: asString(c.id),
+        author,
+        service,
+        version: asString(c.version),
+        environment: asString(c.environment),
+        status: asString(c.status),
+        description: asString(c.description),
+        commitSha,
+        commitUrl: httpUrl(firstString(c, 'commitUrl', 'commit_url')) ?? commitLink(c, commitSha),
+        deployedAt: firstString(c, 'deployedAt', 'deployed_at'),
+        history: { previous: readDeploy(history.previous), rollback: readDeploy(history.rollback) },
+        fixPlan: readFixPlan(rankingData.fixPlan),
+        source: 'ranking',
+      };
+    }
+  }
+
+  // Fallback: the root cause's (or its selected candidate's) strongest deploy.
+  const ranking = rankingData ? readRanking(rankingData) : null;
+  const selected = ranking?.candidates.find((c) => c.selected) ?? null;
+  const pool = new Set([...linked, ...(selected?.evidenceIds ?? [])]);
+  const deploys = all
+    .filter((e) => evidenceKind(e) === 'event_alignment' && isRecord(e.data) && isRecord(e.data.event))
+    .map((e) => {
+      const data = e.data as Record<string, unknown>;
+      const event = data.event as Record<string, unknown>;
+      return {
+        own: pool.has(e.id),
+        revert: data.revert === true,
+        relevance: asNumber(data.relevance) ?? 0,
+        time: asString(event.time),
+        labels: isRecord(event.labels) ? event.labels : {},
+      };
+    });
+  const main = deploys
+    .filter((d) => d.own && !d.revert)
+    .sort((a, b) => b.relevance - a.relevance)[0];
+  if (!main) return null;
+  const l = main.labels;
+  const author = asString(l.author);
+  const service = asString(l.service);
+  if (!author && !service) return null;
+  const commitSha = firstString(l, 'commit_sha', 'commitSha', 'commit');
+  const status = asString(l.status);
+  const at = time(main.time);
+  const sameService = deploys
+    .filter((d) => d !== main && service && asString(d.labels.service) === service)
+    .map((d) => ({
+      at: time(d.time),
+      deploy: readDeploy({ ...d.labels, deployedAt: d.time }),
+      revert: d.revert,
+      status: asString(d.labels.status),
+    }))
+    .filter((d) => d.deploy && Number.isFinite(d.at));
+  const previous =
+    sameService.filter((d) => d.at < at && !BAD_STATUS.test(d.status ?? '')).sort((a, b) => b.at - a.at)[0]?.deploy ?? null;
+  const later = sameService.filter((d) => d.at > at).sort((a, b) => a.at - b.at);
+  const rollback = (later.find((d) => d.revert) ?? (status === 'rolled_back' ? later[0] : undefined))?.deploy ?? null;
+  return {
+    id: asString(l.id),
+    author,
+    service,
+    version: asString(l.version),
+    environment: asString(l.environment),
+    status,
+    description: asString(l.description),
+    commitSha,
+    commitUrl: commitLink(l, commitSha),
+    deployedAt: main.time,
+    history: { previous, rollback },
+    fixPlan: null,
+    source: 'fallback',
+  };
+}
+
+/** "carla.m" -> "CM", "dev" -> "DE", "Ana Lopez" -> "AL". */
+export function handleInitials(handle: string | null | undefined): string {
+  const clean = (handle ?? '').replace(/@.*$/, '').trim();
+  if (!clean) return '?';
+  const parts = clean.split(/[\s._\-]+/).filter(Boolean);
+  const letters = parts.length >= 2 ? `${parts[0]![0]}${parts[1]![0]}` : clean.slice(0, 2);
+  return letters.toUpperCase();
+}
+
+/** "2026-10-08T08:40:00Z" -> "08:40 UTC". */
+export function utcClock(iso: string | null | undefined): string | null {
+  const d = iso ? new Date(iso) : null;
+  if (!d || Number.isNaN(d.getTime())) return null;
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`;
+}
+
+/** "2026-10-08T08:40:00Z" -> "Oct 8". */
+export function utcShortDay(iso: string | null | undefined): string | null {
+  const d = iso ? new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso) : null;
+  if (!d || Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+/** "web-checkout v2.14.0", or whichever half is known. */
+export function culpritChange(c: Pick<Culprit, 'service' | 'version'>): string {
+  return [c.service, c.version].filter(Boolean).join(' ') || 'a change';
+}
+
+export interface CausedByParts {
+  before: string;
+  handle: string;
+  /** Text inside the parentheses after the handle, e.g. "web-checkout v2.14.0". */
+  detail: string | null;
+  after: string;
+}
+
+/**
+ * Splits a notification message around "Caused by <handle> (...)" so the
+ * handle can be drawn as a chip. Conservative: the handle must be a single
+ * token of handle characters, otherwise null (render plain text).
+ */
+export function parseCausedBy(text: string | null | undefined): CausedByParts | null {
+  if (!text) return null;
+  const m = /Caused by ([A-Za-z0-9][A-Za-z0-9._@-]{0,63})(?: \(([^()]{1,120})\))?/.exec(text);
+  if (!m) return null;
+  let handle = m[1]!;
+  let tail = '';
+  while (/[.\-@_]$/.test(handle)) {
+    tail = handle.slice(-1) + tail;
+    handle = handle.slice(0, -1);
+  }
+  if (!handle) return null;
+  const end = m.index + m[0].length;
+  return {
+    before: text.slice(0, m.index),
+    handle,
+    detail: m[2] && !tail ? m[2] : null,
+    after: (m[2] && tail ? `${tail} (${m[2]})` : tail) + text.slice(end),
+  };
+}

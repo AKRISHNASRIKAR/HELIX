@@ -10,6 +10,7 @@ import { formatRelative } from '../../../lib/format';
 import { EASE } from '../../../components/motion';
 import { ARRIVED_EVENT } from '../../../components/notification-toaster';
 import { MarkReadButton } from './notification-actions';
+import { CausedByText } from '../../../components/culprit';
 
 const KIND_STYLE: Record<NotificationKind, { ring: string; text: string }> = {
   opened: { ring: 'border-[var(--accent)] shadow-[0_0_20px_-6px_var(--glow-strong)]', text: 'text-[var(--text-primary)]' },
@@ -88,7 +89,11 @@ function FeedItem({ n, index }: { n: AppNotification; index: number }) {
           </time>
         </div>
         <p className={`mt-1.5 text-[15px] leading-snug tracking-tight ${unread ? 'font-semibold' : 'font-medium'}`}>{n.title}</p>
-        {n.body && <p className="mt-1 line-clamp-3 text-[13px] leading-relaxed text-[var(--text-secondary)]">{n.body}</p>}
+        {n.body && (
+          <p className="mt-1 line-clamp-3 text-[13px] leading-relaxed text-[var(--text-secondary)]">
+            <CausedByText text={n.body} />
+          </p>
+        )}
         {(href || unread) && (
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             {href ? (

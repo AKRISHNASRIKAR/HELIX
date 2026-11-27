@@ -6,9 +6,11 @@ import {
   formatMs,
   messageTransport,
   messagesForTask,
+  readCulprit,
   readSnapshot,
   rootCauseFinding,
   snapshotForTask,
+  type Culprit,
 } from './trace';
 import { isActiveStatus } from './investigations';
 
@@ -283,6 +285,8 @@ export interface Timeline {
   rootCause: TraceFinding | null;
   confidence: number | null;
   tiles: RootCauseTile[];
+  /** Who shipped the change behind the root cause, and how to fix it (shown after the tiles). */
+  culprit: Culprit | null;
   evidenceTotal: number;
   findingTotal: number;
 }
@@ -626,6 +630,7 @@ export function buildTimeline(trace: InvestigationTrace): Timeline {
     rootCause: root,
     confidence,
     tiles: rootCauseTiles(trace),
+    culprit: root ? readCulprit(trace) : null,
     evidenceTotal: (trace.evidence ?? []).length,
     findingTotal: beats.filter((b) => b.kind === 'finding').length,
   };

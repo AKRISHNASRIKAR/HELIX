@@ -1,9 +1,12 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import type { RootCauseStory } from '../../../../../lib/trace';
+import type { Culprit, RootCauseStory } from '../../../../../lib/trace';
 import { CueOnView, LiveDot, Reveal, Stagger } from '../../../../../components/motion';
+import { CulpritCard } from './culprit-card';
 import { ConfidenceRing, DeltaBars, EventTimeline, SeriesChart, ValueVsExpected, fmtPct, fmtValue } from './charts';
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 const longDay = (iso: string) => {
   const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
@@ -17,7 +20,15 @@ const longDay = (iso: string) => {
  * four tiles (what dropped, when, where, why), each with a small chart drawn
  * from the evidence the Coordinator ranked. Plays the `rootCause` cue once.
  */
-export function StoryHero({ story, contributors }: { story: RootCauseStory; contributors: number }) {
+export function StoryHero({
+  story,
+  contributors,
+  culprit = null,
+}: {
+  story: RootCauseStory;
+  contributors: number;
+  culprit?: Culprit | null;
+}) {
   const { what, where, volume, why } = story;
   const tiles: ReactNode[] = [];
 
@@ -145,6 +156,22 @@ export function StoryHero({ story, contributors }: { story: RootCauseStory; cont
             <Stagger className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" step={0.12} delay={0.2}>
               {tiles}
             </Stagger>
+          )}
+
+          {culprit && (
+            <CulpritCard
+              culprit={culprit}
+              broke={
+                what
+                  ? {
+                      label: `${capitalize(what.metricName.replace(/\s*\(daily\)/i, '').replace(/_/g, ' '))}${
+                        what.changePercent != null ? ` ${fmtPct(what.changePercent)}` : ''
+                      }`,
+                      date: what.date,
+                    }
+                  : null
+              }
+            />
           )}
 
           {(ruled.length > 0 || story.signals.length > 0) && (

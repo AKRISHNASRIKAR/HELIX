@@ -8,6 +8,7 @@ import type { AppNotification } from '../lib/api';
 import { notificationHref, notificationKind, notificationTypeLabel, type NotificationKind } from '../lib/notifications';
 import { useSound } from './experience';
 import { EASE } from './motion';
+import { CausedByText } from './culprit';
 import { UNREAD_EVENT } from './notification-bell';
 
 /** Dispatch this window event to make the toaster poll right away (e.g. after "Run now"). */
@@ -156,7 +157,9 @@ function Toast({ n, onDismiss }: { n: AppNotification; onDismiss: (id: string) =
           <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
             {notificationTypeLabel(n.type)}
           </p>
-          <p className="mt-0.5 line-clamp-2 text-[13px] font-medium leading-snug text-[var(--text-primary)]">{n.body || n.title}</p>
+          <p className="mt-0.5 line-clamp-2 text-[13px] font-medium leading-snug text-[var(--text-primary)]">
+            <CausedByText text={n.body || n.title} />
+          </p>
           {href && (
             <Link
               href={href}

@@ -20,6 +20,7 @@ import { formatPercent, formatRelative } from '../../../../lib/format';
 import {
   agentLabel,
   buildRootCauseStory,
+  readCulprit,
   contributingFindings,
   metricSeriesById,
   plannerLabel,
@@ -88,7 +89,7 @@ export function OverviewTab({
       {autonomous && <TriggerCard rows={triggerContextRows(triggerContext)} monitor={monitor} />}
 
       {story ? (
-        <StoryHero story={story} contributors={contributors.length} />
+        <StoryHero story={story} contributors={contributors.length} culprit={trace ? readCulprit(trace) : null} />
       ) : (
         rootCause && (
           <CueOnView cue="rootCause">
